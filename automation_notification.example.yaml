@@ -1,0 +1,27 @@
+alias: "ARTEMIS - Nouvelle intervention"
+description: "Notification mobile lors d'une nouvelle intervention ARTEMIS"
+mode: queued
+max: 10
+
+triggers:
+  - trigger: event
+    event_type: artemis_new_intervention
+
+conditions: []
+
+actions:
+  - action: notify.mobile_app_TON_TELEPHONE
+    data:
+      title: "{{ trigger.event.data.title }}"
+      message: "{{ trigger.event.data.message }}"
+      data:
+        channel: "Interventions SPV"
+        importance: high
+        priority: high
+        ttl: 0
+        notification_icon: "mdi:fire-alert"
+        tag: "artemis_{{ trigger.event.data.id }}"
+        actions:
+          - action: "URI"
+            title: "Ouvrir Smartemis"
+            uri: "app://com.sis.smartemis"

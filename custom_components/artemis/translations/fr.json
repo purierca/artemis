@@ -1,0 +1,38 @@
+{
+  "title": "ARTEMIS WebEvo",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connexion à ARTEMIS WebEvo",
+        "description": "Connexion au portail ARTEMIS. Les valeurs par défaut correspondent au déploiement SDIS 39 utilisé pour développer l'intégration. Les identifiants restent stockés dans la configuration locale de Home Assistant.",
+        "data": {
+          "host": "Serveur ARTEMIS",
+          "cas_service": "URL de service CAS",
+          "username": "Utilisateur",
+          "password": "Mot de passe"
+        },
+        "data_description": {
+          "host": "Origine publique d'ARTEMIS WebEvo, par exemple https://artemisweb.exemple.fr",
+          "cas_service": "Identifiant de service CAS. Conserver la valeur par défaut sauf si votre déploiement ARTEMIS utilise une autre URL de service."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnecter ARTEMIS",
+        "description": "Le mot de passe ARTEMIS n'est plus accepté. Saisissez le nouveau mot de passe.",
+        "data": {
+          "password": "Mot de passe"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossible de joindre ARTEMIS.",
+      "invalid_auth": "ARTEMIS a refusé les identifiants ou la transmission SSO.",
+      "unknown": "Erreur ARTEMIS inattendue. Consultez les journaux Home Assistant."
+    },
+    "abort": {
+      "already_configured": "Ce compte ARTEMIS est déjà configuré.",
+      "reauth_successful": "ARTEMIS est reconnecté.",
+      "unknown": "Impossible de retrouver l'intégration à reconnecter."
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "domain": "artemis",
+  "name": "ARTEMIS WebEvo",
+  "version": "0.1.0",
+  "config_flow": true,
+  "single_config_entry": true,
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "documentation": "https://github.com/purierca/artemis",
+  "issue_tracker": "https://github.com/purierca/artemis/issues",
+  "codeowners": ["@purierca"],
+  "requirements": []
+}
