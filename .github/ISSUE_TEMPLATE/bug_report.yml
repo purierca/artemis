@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible problem with the ARTEMIS WebEvo integration
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not upload an unredacted HAR.** Remove passwords, CAS tickets, cookies, firefighter names and operational addresses before sharing logs.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.9.x"
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the expected and actual behaviour.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitised logs
+      description: Remove all credentials, cookies, tickets, names and operational data.
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data safety
+      options:
+        - label: I confirmed that the information above contains no credentials, session tokens or sensitive operational data.
+          required: true
