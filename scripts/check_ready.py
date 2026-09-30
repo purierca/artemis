@@ -46,6 +46,8 @@ for path in (
     ROOT / "custom_components" / "artemis" / "manifest.json",
     ROOT / ".github" / "ISSUE_TEMPLATE" / "config.yml",
 ):
+    if not path.exists():
+        continue
     text = path.read_text(encoding="utf-8")
     if OWNER_TOKEN in text or REPO_TOKEN in text:
         placeholder_files.append(str(path.relative_to(ROOT)))

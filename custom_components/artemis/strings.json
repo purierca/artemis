@@ -12,8 +12,8 @@
           "password": "Password"
         },
         "data_description": {
-          "host": "Public ARTEMIS WebEvo origin, for example https://artemisweb.example.fr",
-          "cas_service": "CAS service identifier. Keep the default unless your ARTEMIS deployment uses another service URL."
+          "host": "Public ARTEMIS WebEvo origin, including protocol and hostname.",
+          "cas_service": "CAS service identifier. Keep the default unless your ARTEMIS deployment uses another identifier."
         }
       },
       "reauth_confirm": {
