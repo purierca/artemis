@@ -163,6 +163,121 @@ N° 26000042 · 11:43
 
 The same YAML is included in [`automation_notification.example.yaml`](automation_notification.example.yaml).
 
+## Persistent ARTEMIS status notification
+
+You can keep a compact, persistent Android notification showing your current ARTEMIS status, the number of available personnel at the station, and the next planned status change.
+
+Example:
+
+```text
+🚒 4 dispo · AS1 > 05/10 07:00 > DI1
+```
+
+If the next change is later the same day, the date is omitted:
+
+```text
+🚒 4 dispo · AS1 > 18:30 > DI1
+```
+
+Tapping the notification can open the Smartemis Android app directly.
+
+This example uses:
+
+- `sensor.available_personnel_artemis`
+- `sensor.statut_artemis`
+- `sensor.prochain_changement_artemis`
+
+```yaml
+alias: ARTEMIS - Statut permanent
+
+triggers:
+  - trigger: state
+    entity_id:
+      - sensor.available_personnel_artemis
+      - sensor.statut_artemis
+      - sensor.prochain_changement_artemis
+
+  - trigger: homeassistant
+    event: start
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ states('sensor.available_personnel_artemis') not in ['unknown', 'unavailable']
+         and states('sensor.statut_artemis') not in ['unknown', 'unavailable']
+         and states('sensor.prochain_changement_artemis') not in ['unknown', 'unavailable'] }}
+
+actions:
+  - action: notify.mobile_app_YOUR_PHONE
+    data:
+      title: >-
+        {% set next_dt = as_local(as_datetime(
+          state_attr('sensor.prochain_changement_artemis', 'date')
+        )) %}
+        {% set current_code = state_attr('sensor.statut_artemis', 'code') %}
+        {% set next_code = state_attr('sensor.prochain_changement_artemis', 'prochain_code') %}
+        🚒 {{ states('sensor.available_personnel_artemis') }} dispo ·
+        {{ current_code }} >
+        {% if next_dt.date() == now().date() %}
+          {{ next_dt.strftime('%H:%M') }}
+        {% else %}
+          {{ next_dt.strftime('%d/%m %H:%M') }}
+        {% endif %}
+        > {{ next_code }}
+
+      # Android requires a message field.
+      # A zero-width space keeps the notification visually collapsed.
+      message: "\u200B"
+
+      data:
+        tag: artemis_status
+        persistent: true
+        sticky: true
+        alert_once: true
+        notification_icon: mdi:fire-alert
+        channel: ARTEMIS Status
+
+        # Android: tap the notification to open Smartemis
+        clickAction: "app://com.sis.smartemis"
+
+mode: restart
+```
+
+with your own Home Assistant Companion App notification service.
+
+### How it behaves
+
+The notification is automatically refreshed whenever:
+
+- the number of available personnel changes;
+- your current ARTEMIS status changes;
+- your next scheduled status change changes;
+- Home Assistant restarts.
+
+Because the same notification `tag` is reused:
+
+```yaml
+tag: artemis_status
+```
+
+Home Assistant updates the existing notification instead of creating a new one each time.
+
+`alert_once: true` keeps those updates silent, while `persistent: true` and `sticky: true` make the notification suitable as a small always-available ARTEMIS status indicator.
+
+### Example use
+
+```text
+🚒 3 dispo · DI1 > 14:30 > IND
+```
+
+or, when the next change is on another day:
+
+```text
+🚒 3 dispo · AS1 > 06/10 07:00 > IND
+```
+
+This gives a quick view of both your own availability and the current station availability without opening ARTEMIS or Smartemis.
+
 ## Installation with HACS
 
 This repository is a HACS **Integration** repository.
