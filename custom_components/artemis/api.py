@@ -25,6 +25,10 @@ class ArtemisConnectionError(ArtemisError):
     """ARTEMIS could not be reached."""
 
 
+class ArtemisWriteError(ArtemisError):
+    """ARTEMIS rejected or could not safely complete a planning write."""
+
+
 class _LtParser(HTMLParser):
     """Extract the CAS login ticket field without third-party HTML parsers."""
 
@@ -279,6 +283,27 @@ class ArtemisApi:
         )
         if not isinstance(data, dict):
             raise ArtemisConnectionError("Unexpected personPlanning/getPlanning response")
+        return data
+
+
+    async def async_save_staff(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Save one personal planning day using WebEvo's planning editor endpoint."""
+        data = await self._request_json(
+            "POST",
+            "/artemis-web/api/planningStaff/saveStaff",
+            json=payload,
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        if not isinstance(data, dict):
+            raise ArtemisWriteError("Unexpected planningStaff/saveStaff response")
+        if data.get("ubiquityPlanning"):
+            # WebEvo normally opens an interactive confirmation dialog here.
+            # The integration deliberately refuses to force that conflict.
+            raise ArtemisWriteError(
+                "ARTEMIS requires an ubiquity confirmation; no change was forced"
+            )
+        if not isinstance(data.get("staffMember"), dict):
+            raise ArtemisWriteError("ARTEMIS did not confirm the saved planning row")
         return data
 
     async def async_planning_counters(

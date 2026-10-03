@@ -22,3 +22,7 @@ Do not open a public issue containing exploit details or credentials. Contact th
 ## Scope
 
 This integration is intended to use only data that the configured ARTEMIS account is already authorised to access. It does not attempt to bypass authentication, access controls, TLS protections or other security mechanisms.
+
+## Personal planning writes
+
+Version 0.2.0 adds an optional one-button personal status cycle. This is a real write to ARTEMIS, not a Home Assistant-only helper. The implementation is intentionally limited to the authenticated user, the `IND` / `DI1` / `AS1` cycle, and the preserved next planned status boundary. Do not expose the button or its notification action to untrusted Home Assistant users.

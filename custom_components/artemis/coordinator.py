@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from datetime import datetime, timedelta
 import logging
@@ -9,12 +10,18 @@ from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.event import async_track_point_in_time
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import ArtemisApi, ArtemisAuthError, ArtemisConnectionError
+from .api import (
+    ArtemisApi,
+    ArtemisAuthError,
+    ArtemisConnectionError,
+    ArtemisWriteError,
+)
 from .const import (
     CENTER_COUNTER_UPDATE_INTERVAL,
     EVENT_NEW_INTERVENTION,
@@ -24,15 +31,24 @@ from .const import (
 )
 from .helpers import (
     build_planning_snapshot,
+    build_status_override_requests,
+    cycle_status_code,
     normalize_planning,
     operation_event_data,
     operation_identifier,
     parse_clock,
     week_start_for,
 )
-from .models import CenterAvailabilitySnapshot, OperationsSnapshot, PlanningSnapshot
+from .models import (
+    CenterAvailabilitySnapshot,
+    OperationsSnapshot,
+    PlanningSnapshot,
+    StatusValue,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+_OVERRIDE_STORE_VERSION = 1
 
 
 class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
@@ -66,6 +82,181 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         self._tz = ZoneInfo(hass.config.time_zone)
         self._planning_start = parse_clock(None)
         self._planning_ids: dict[str, int | str] = {}
+        self._payloads: list[dict] = []
+        self._available_status_codes: set[str] = set()
+        self.read_only = bool(init_data.get("readOnly", True))
+        self._write_lock = asyncio.Lock()
+
+        self._override_store = Store[dict[str, str]](
+            hass,
+            _OVERRIDE_STORE_VERSION,
+            f"artemis.{entry.entry_id}.status_override",
+        )
+        self._override_boundary: datetime | None = None
+        self._override_next_status: StatusValue | None = None
+
+    async def async_initialize_status_override(self) -> None:
+        """Restore a pending local override boundary across HA restarts."""
+        stored = await self._override_store.async_load() or {}
+        raw_boundary = stored.get("boundary")
+        if not raw_boundary:
+            return
+        try:
+            boundary = datetime.fromisoformat(raw_boundary)
+            if boundary.tzinfo is None:
+                boundary = boundary.replace(tzinfo=self._tz)
+            boundary = boundary.astimezone(self._tz)
+        except (TypeError, ValueError):
+            await self._override_store.async_save({})
+            return
+
+        if boundary <= datetime.now(self._tz):
+            await self._override_store.async_save({})
+            return
+
+        code = str(stored.get("next_code") or "").strip()
+        name = str(stored.get("next_name") or code).strip()
+        if not code:
+            await self._override_store.async_save({})
+            return
+
+        self._override_boundary = boundary
+        self._override_next_status = StatusValue(code=code, name=name)
+
+    def _override_is_active(self, now: datetime | None = None) -> bool:
+        if self._override_boundary is None or self._override_next_status is None:
+            return False
+        now = now or datetime.now(self._tz)
+        return now < self._override_boundary
+
+    @property
+    def effective_next_change(self) -> datetime | None:
+        """Return the preserved planned boundary while a manual override is active."""
+        if self._override_is_active():
+            return self._override_boundary
+        return self.data.next_change if self.data is not None else None
+
+    @property
+    def effective_next_status(self) -> StatusValue | None:
+        """Return the status originally planned at the preserved boundary."""
+        if self._override_is_active():
+            return self._override_next_status
+        return self.data.next_status if self.data is not None else None
+
+    @property
+    def status_override_active(self) -> bool:
+        return self._override_is_active()
+
+    def is_status_code_available(self, code: str) -> bool:
+        """Return whether WebEvo advertised a status code for this personal planning."""
+        return not self._available_status_codes or code in self._available_status_codes
+
+    async def _set_override(
+        self, boundary: datetime, next_status: StatusValue
+    ) -> None:
+        self._override_boundary = boundary
+        self._override_next_status = next_status
+        await self._override_store.async_save(
+            {
+                "boundary": boundary.isoformat(),
+                "next_code": next_status.code,
+                "next_name": next_status.name,
+            }
+        )
+
+    async def _clear_override(self) -> None:
+        self._override_boundary = None
+        self._override_next_status = None
+        await self._override_store.async_save({})
+
+    async def async_cycle_status(self) -> str:
+        """Cycle IND -> DI1 -> AS1 -> IND until the next planned change."""
+        if self.read_only:
+            raise HomeAssistantError("ARTEMIS reports this personal planning as read-only")
+
+        async with self._write_lock:
+            # Start from the freshest server state before generating a write payload.
+            await self.async_request_refresh()
+            if self.data is None or self.data.current is None:
+                raise HomeAssistantError("ARTEMIS current status is unavailable")
+
+            current_code = self.data.current.code
+            target_code = cycle_status_code(current_code)
+            if target_code is None:
+                raise HomeAssistantError(
+                    f"ARTEMIS status {current_code} is not in the IND/DI1/AS1 cycle"
+                )
+            if not self.is_status_code_available(target_code):
+                raise HomeAssistantError(
+                    f"ARTEMIS does not offer status {target_code} for this planning"
+                )
+
+            now = datetime.now(self._tz)
+            # WebEvo's save endpoint works at minute precision. Apply from the
+            # current minute so the new active status is visible immediately.
+            start = now.replace(second=0, microsecond=0)
+
+            had_override = self._override_is_active(now)
+            if had_override:
+                boundary = self._override_boundary
+                planned_next = self._override_next_status
+            else:
+                boundary = self.data.next_change
+                planned_next = self.data.next_status
+
+            if boundary is None or planned_next is None:
+                raise HomeAssistantError(
+                    "No future planned ARTEMIS status change was found; nothing was changed"
+                )
+            if start >= boundary:
+                raise HomeAssistantError(
+                    "The next planned ARTEMIS change is too close to safely apply an override"
+                )
+
+            try:
+                requests = build_status_override_requests(
+                    self._payloads,
+                    staff_id=self.staff_id,
+                    start=start,
+                    end=boundary,
+                    new_status_code=target_code,
+                    tz=self._tz,
+                )
+            except ValueError as err:
+                raise HomeAssistantError(str(err)) from err
+
+            if not requests:
+                raise HomeAssistantError(
+                    "ARTEMIS returned no writable planning row for the override window"
+                )
+
+            new_override = not had_override
+            if new_override:
+                # Preserve the original boundary *before* writing. If target_code is
+                # the same as the status planned at that boundary, WebEvo may no
+                # longer expose it as a real status change after the save.
+                await self._set_override(boundary, planned_next)
+
+            saved_rows = 0
+            try:
+                for request in requests:
+                    await self.api.async_save_staff(request)
+                    saved_rows += 1
+            except (
+                ArtemisAuthError,
+                ArtemisConnectionError,
+                ArtemisWriteError,
+            ) as err:
+                # If nothing reached the server, discard the new boundary. If some
+                # days were already saved, keep it so a retry still stops at the
+                # originally planned change instead of extending the override.
+                if new_override and saved_rows == 0:
+                    await self._clear_override()
+                await self.async_request_refresh()
+                raise HomeAssistantError(str(err)) from err
+
+            await self.async_request_refresh()
+            return target_code
 
     async def _async_update_data(self) -> PlanningSnapshot:
         try:
@@ -85,6 +276,11 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                 )
                 payloads.append(payload)
                 lookahead = index + 1
+
+                for state in payload.get("admStates") or []:
+                    code = str((state or {}).get("code") or "").strip()
+                    if code:
+                        self._available_status_codes.add(code)
 
                 # Use the server's actual planning-start time as soon as we have it.
                 planning = payload.get("planning") or {}
@@ -114,7 +310,16 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             if snapshot is None:
                 raise UpdateFailed("ARTEMIS returned no planning data")
 
-            self._schedule_exact_change(snapshot.next_change)
+            self._payloads = payloads
+            if self._override_boundary is not None and now >= self._override_boundary:
+                await self._clear_override()
+
+            schedule_when = (
+                self._override_boundary
+                if self._override_is_active(now)
+                else snapshot.next_change
+            )
+            self._schedule_exact_change(schedule_when)
             return snapshot
 
         except ArtemisAuthError as err:

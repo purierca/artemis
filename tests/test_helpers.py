@@ -94,6 +94,101 @@ class PlanningTests(unittest.TestCase):
         )
         self.assertEqual(snap.next_change, datetime(2026, 10, 1, 7, 0, tzinfo=tz))
 
+    def test_cycle_status_code(self) -> None:
+        self.assertEqual(helpers.cycle_status_code("IND"), "DI1")
+        self.assertEqual(helpers.cycle_status_code("DI1"), "AS1")
+        self.assertEqual(helpers.cycle_status_code("AS1"), "IND")
+        self.assertIsNone(helpers.cycle_status_code("GP"))
+
+    def test_status_override_spans_days_and_preserves_next_change(self) -> None:
+        tz = ZoneInfo("Europe/Paris")
+        payload = {
+            "planning": {
+                "fireUnit": {"planningStartTime": "07:00:00"},
+                "staff": [
+                    {
+                        "id": "ME",
+                        "planningId": 1,
+                        "planningStartDate": "2026-10-03",
+                        "priority": 1,
+                        "name": "USER",
+                        "firstName": "TEST",
+                        "planningPeriods": [
+                            {
+                                "startTime": "00:00:00",
+                                "endTime": "23:59:59",
+                                "state": {"code": "AS1"},
+                            }
+                        ],
+                    },
+                    {
+                        "id": "ME",
+                        "planningId": 2,
+                        "planningStartDate": "2026-10-04",
+                        "priority": 1,
+                        "name": "USER",
+                        "firstName": "TEST",
+                        "planningPeriods": [
+                            {
+                                "startTime": "00:00:00",
+                                "endTime": "23:59:59",
+                                "state": {"code": "AS1"},
+                            }
+                        ],
+                    },
+                    {
+                        "id": "ME",
+                        "planningId": 3,
+                        "planningStartDate": "2026-10-05",
+                        "priority": 1,
+                        "name": "USER",
+                        "firstName": "TEST",
+                        "planningPeriods": [
+                            {
+                                "startTime": "00:00:00",
+                                "endTime": "02:00:00",
+                                "state": {"code": "AS1"},
+                            },
+                            {
+                                "startTime": "02:00:00",
+                                "endTime": "23:59:59",
+                                "state": {"code": "IND"},
+                            },
+                        ],
+                    },
+                ],
+            }
+        }
+        updates = helpers.build_status_override_requests(
+            [payload],
+            staff_id="ME",
+            start=datetime(2026, 10, 3, 14, 38, tzinfo=tz),
+            end=datetime(2026, 10, 5, 9, 0, tzinfo=tz),
+            new_status_code="DI1",
+            tz=tz,
+        )
+        self.assertEqual(len(updates), 3)
+
+        first = updates[0]["staffMember"]["planningPeriods"]
+        self.assertEqual(first[0]["state"]["code"], "AS1")
+        self.assertEqual(
+            (first[0]["realEndTimeHour"], first[0]["realEndTimeMinute"]),
+            ("14", "38"),
+        )
+        self.assertEqual(first[1]["state"]["code"], "DI1")
+
+        middle = updates[1]["staffMember"]["planningPeriods"]
+        self.assertEqual([item["state"]["code"] for item in middle], ["DI1"])
+
+        last = updates[2]["staffMember"]["planningPeriods"]
+        self.assertEqual(last[0]["state"]["code"], "DI1")
+        self.assertEqual(
+            (last[0]["realEndTimeHour"], last[0]["realEndTimeMinute"]),
+            ("9", "0"),
+        )
+        self.assertEqual(last[1]["state"]["code"], "IND")
+
+
 
 class OperationTests(unittest.TestCase):
     def test_notification_payload(self) -> None:

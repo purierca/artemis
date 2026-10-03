@@ -20,7 +20,7 @@ from .coordinator import (
     ArtemisPlanningCoordinator,
 )
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
 
 
 @dataclass(slots=True)
@@ -59,6 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryAuthFailed("ARTEMIS did not expose a personal planning identity")
 
     planning = ArtemisPlanningCoordinator(hass, entry, api, init_data)
+    await planning.async_initialize_status_override()
     try:
         refresh_seconds = int(operations_init.get("refreshInterval") or 15)
     except (TypeError, ValueError):

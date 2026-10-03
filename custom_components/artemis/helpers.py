@@ -7,6 +7,7 @@ from html import escape
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
+from .const import STATUS_CYCLE
 from .models import PlanningInterval, PlanningSnapshot, StatusValue
 
 
@@ -157,6 +158,171 @@ def build_planning_snapshot(
         lookahead_weeks=lookahead_weeks,
     )
 
+
+
+def cycle_status_code(current_code: str) -> str | None:
+    """Return the next state in the safe personal availability cycle."""
+    try:
+        index = STATUS_CYCLE.index(current_code)
+    except ValueError:
+        return None
+    return STATUS_CYCLE[(index + 1) % len(STATUS_CYCLE)]
+
+
+def _save_period(
+    code: str,
+    start: datetime,
+    end: datetime,
+    *,
+    operational_end: datetime,
+) -> dict[str, Any]:
+    """Convert an absolute segment to the fields sent by WebEvo's editor."""
+    # The WebEvo editor represents the end of the operational day as the last
+    # minute before the boundary (for a 07:00 day start this is 06:59).
+    end_for_wire = end
+    if end >= operational_end:
+        end_for_wire = operational_end - timedelta(minutes=1)
+
+    return {
+        "state": {"code": code},
+        "realStartTimeHour": str(start.hour),
+        "realStartTimeMinute": str(start.minute),
+        "realEndTimeHour": str(end_for_wire.hour),
+        "realEndTimeMinute": str(end_for_wire.minute),
+    }
+
+
+def build_status_override_requests(
+    payloads: Iterable[dict[str, Any]],
+    *,
+    staff_id: str,
+    start: datetime,
+    end: datetime,
+    new_status_code: str,
+    tz: ZoneInfo,
+) -> list[dict[str, Any]]:
+    """Build saveStaff requests changing only [start, end) for one person.
+
+    Existing planning boundaries outside the override window are preserved.
+    The function may return several requests because WebEvo stores one row per
+    operational day.
+    """
+    if end <= start:
+        return []
+
+    requests: list[tuple[datetime, dict[str, Any]]] = []
+    seen_rows: set[tuple[str, str]] = set()
+
+    for payload in payloads:
+        planning = payload.get("planning") or {}
+        fire_unit = planning.get("fireUnit") or {}
+        planning_start = parse_clock(fire_unit.get("planningStartTime"))
+
+        for staff_day in planning.get("staff") or []:
+            if str(staff_day.get("id") or "") != staff_id:
+                continue
+
+            day_str = str(staff_day.get("planningStartDate") or "")
+            if not day_str:
+                continue
+            try:
+                day = date.fromisoformat(day_str)
+            except ValueError:
+                continue
+
+            operational_start = datetime.combine(day, planning_start, tzinfo=tz)
+            operational_end = operational_start + timedelta(days=1)
+            if operational_end <= start or operational_start >= end:
+                continue
+
+            planning_id = staff_day.get("planningId")
+            if planning_id in (None, ""):
+                raise ValueError(
+                    f"ARTEMIS did not expose a planning id for {day_str}"
+                )
+
+            row_key = (day_str, str(planning_id))
+            if row_key in seen_rows:
+                continue
+            seen_rows.add(row_key)
+
+            periods_out: list[dict[str, Any]] = []
+            for period in staff_day.get("planningPeriods") or []:
+                state = period.get("state") or {}
+                original_code = str(state.get("code") or "").strip()
+                if not original_code:
+                    continue
+
+                raw_start = period.get("startTime")
+                raw_end = period.get("endTime")
+                period_start = operational_start + parse_hms(raw_start)
+                period_end = operational_start + parse_hms(raw_end)
+                if raw_end == "23:59:59":
+                    period_end = operational_end
+                if period_end <= period_start:
+                    continue
+
+                overlap_start = max(period_start, start)
+                overlap_end = min(period_end, end)
+
+                if overlap_end <= overlap_start:
+                    periods_out.append(
+                        _save_period(
+                            original_code,
+                            period_start,
+                            period_end,
+                            operational_end=operational_end,
+                        )
+                    )
+                    continue
+
+                if period_start < overlap_start:
+                    periods_out.append(
+                        _save_period(
+                            original_code,
+                            period_start,
+                            overlap_start,
+                            operational_end=operational_end,
+                        )
+                    )
+
+                periods_out.append(
+                    _save_period(
+                        new_status_code,
+                        overlap_start,
+                        overlap_end,
+                        operational_end=operational_end,
+                    )
+                )
+
+                if overlap_end < period_end:
+                    periods_out.append(
+                        _save_period(
+                            original_code,
+                            overlap_end,
+                            period_end,
+                            operational_end=operational_end,
+                        )
+                    )
+
+            if not periods_out:
+                continue
+
+            request = {
+                "staffMember": {
+                    "id": staff_id,
+                    "planningId": planning_id,
+                    "priority": str(staff_day.get("priority", 10)),
+                    "planningPeriods": periods_out,
+                    "name": str(staff_day.get("name") or ""),
+                    "firstName": str(staff_day.get("firstName") or ""),
+                },
+                "forceUbiquity": False,
+            }
+            requests.append((operational_start, request))
+
+    requests.sort(key=lambda item: item[0])
+    return [request for _day, request in requests]
 
 def format_address(address: dict[str, Any] | None, *, with_city: bool = True) -> str:
     """Match the address composition used by ARTEMIS WebEvo."""

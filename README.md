@@ -20,7 +20,9 @@ It connects to an authorized ARTEMIS WebEvo account and exposes useful firefight
 - Fires an `artemis_new_intervention` Home Assistant event when a new operation appears.
 - Provides a notification-ready event payload with the operation details exposed by ARTEMIS, including address, units, vehicles, states and external services when available.
 - Automatically logs in through CAS and renews expired ARTEMIS sessions.
-- Operates read-only: it does **not** modify planning, availability, or interventions.
+- Exposes a one-press **personal status cycle button**: `IND -> DI1 -> AS1 -> IND`.
+- Status writes are deliberately limited to **your own personal planning** and only until the next status change that was already planned in ARTEMIS.
+- Never modifies interventions, other firefighters, or centre planning.
 
 ## Entities
 
@@ -34,6 +36,7 @@ Typical entity IDs after a fresh installation:
 | `sensor.available_personnel_artemis` | Number of people currently available at the centre | `mdi:account-multiple-check` |
 | `sensor.active_interventions_count_artemis` | Number of currently active interventions | `mdi:fire-alert` |
 | `binary_sensor.active_interventions_artemis` | On when one or more interventions are active | `mdi:fire-alert` |
+| `button.cycle_artemis_status` | Cycle `IND -> DI1 -> AS1 -> IND` until the preserved next planned change | `mdi:account-switch` |
 
 Home Assistant can adjust an entity ID if a naming collision already exists. Unique IDs remain stable.
 
@@ -56,6 +59,67 @@ horizon_semaines: 1
 ```
 
 The integration ignores ARTEMIS row/day boundaries when the actual status remains unchanged, so an `IND -> IND` boundary is not reported as a status change.
+
+## One-button personal status control
+
+The integration exposes a stateless Home Assistant button:
+
+```text
+button.cycle_artemis_status
+```
+
+Each press cycles the **currently active personal ARTEMIS status**:
+
+```text
+IND -> DI1 -> AS1 -> IND
+```
+
+The change is applied from the current minute **only until the next different status change that was already planned before the first override**. The schedule from that preserved boundary onward is left untouched.
+
+For example:
+
+```text
+Before
+Saturday 14:38                                  Monday 07:00
+AS1 -------------------------------------------> DI1
+
+Press once
+AS1 history | DI1 -----------------------------> DI1
+              ^ current minute                   ^ original boundary preserved
+
+Press again later
+AS1 history | DI1 history | AS1 ----------------> DI1
+```
+
+The preserved boundary is stored by Home Assistant, so repeated presses — and Home Assistant restarts — do not accidentally extend the temporary override when the selected temporary status happens to match the status planned at the boundary.
+
+The button is unavailable when:
+
+- ARTEMIS reports the personal planning as read-only;
+- the current status is not `IND`, `DI1`, or `AS1`;
+- the target status is not offered by that ARTEMIS deployment;
+- no future planned status change can be found.
+
+ARTEMIS WebEvo may also refuse a write because of its own consistency/ubiquity controls. The integration does **not** force those conflicts.
+
+> **Important:** pressing this button writes to your real ARTEMIS personal planning. Home Assistant is not the authoritative operational system; verify important availability changes in the official tools used by your fire and rescue service.
+
+### Simple dashboard button
+
+No helper, `input_select`, script, or intermediate automation is required:
+
+```yaml
+type: button
+entity: button.cycle_artemis_status
+name: Changer statut
+icon: mdi:account-switch
+show_state: false
+tap_action:
+  action: perform-action
+  perform_action: button.press
+  target:
+    entity_id: button.cycle_artemis_status
+```
 
 ## Centre availability
 
@@ -163,29 +227,25 @@ N° 26000042 · 11:43
 
 The same YAML is included in [`automation_notification.example.yaml`](automation_notification.example.yaml).
 
-## Persistent ARTEMIS status notification
+## Persistent Android status notification with a cycle action
 
-You can keep a compact, persistent Android notification showing your current ARTEMIS status, the number of available personnel at the station, and the next planned status change.
-
-Example:
+A compact persistent Android notification can act as an always-visible ARTEMIS summary. Example:
 
 ```text
 🚒 4 dispo · AS1 > 05/10 07:00 > DI1
 ```
 
-If the next change is later the same day, the date is omitted:
+If the next planned change is today, the date is omitted:
 
 ```text
 🚒 4 dispo · AS1 > 18:30 > DI1
 ```
 
-Tapping the notification can open the Smartemis Android app directly.
+Tapping the **notification itself** opens Smartemis. Expanding it shows one action button whose label follows the current cycle, for example `→ DI1`, `→ AS1`, or `→ IND`. Pressing that action triggers `button.cycle_artemis_status`.
 
-This example uses:
+Replace `notify.mobile_app_TON_TELEPHONE` with your Android Companion App notify action.
 
-- `sensor.available_personnel_artemis`
-- `sensor.statut_artemis`
-- `sensor.prochain_changement_artemis`
+### 1. Persistent notification
 
 ```yaml
 alias: ARTEMIS - Statut permanent
@@ -208,7 +268,7 @@ conditions:
          and states('sensor.prochain_changement_artemis') not in ['unknown', 'unavailable'] }}
 
 actions:
-  - action: notify.mobile_app_YOUR_PHONE
+  - action: notify.mobile_app_TON_TELEPHONE
     data:
       title: >-
         {% set next_dt = as_local(as_datetime(
@@ -225,8 +285,7 @@ actions:
         {% endif %}
         > {{ next_code }}
 
-      # Android requires a message field.
-      # A zero-width space keeps the notification visually collapsed.
+      # Android requires a message. A zero-width space keeps the notification compact.
       message: "\u200B"
 
       data:
@@ -237,46 +296,52 @@ actions:
         notification_icon: mdi:fire-alert
         channel: ARTEMIS Status
 
-        # Android: tap the notification to open Smartemis
+        # Tap the notification body -> Smartemis.
         clickAction: "app://com.sis.smartemis"
+
+        # Expanded notification -> cycle the current ARTEMIS status.
+        actions:
+          - action: ARTEMIS_CYCLE_STATUS
+            title: >-
+              {% set current = state_attr('sensor.statut_artemis', 'code') %}
+              {% set cycle = {'IND': 'DI1', 'DI1': 'AS1', 'AS1': 'IND'} %}
+              → {{ cycle.get(current, '—') }}
 
 mode: restart
 ```
 
-with your own Home Assistant Companion App notification service.
+Because the same `tag` is reused, Android updates the existing notification instead of creating a new one. `alert_once: true` keeps normal status refreshes silent.
 
-### How it behaves
+### 2. Handle the notification action
 
-The notification is automatically refreshed whenever:
-
-- the number of available personnel changes;
-- your current ARTEMIS status changes;
-- your next scheduled status change changes;
-- Home Assistant restarts.
-
-Because the same notification `tag` is reused:
+The Companion App sends a `mobile_app_notification_action` event when the action button is pressed. This automation forwards it to the integration button:
 
 ```yaml
-tag: artemis_status
+alias: ARTEMIS - Changer statut depuis notification
+
+triggers:
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: ARTEMIS_CYCLE_STATUS
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.event.data.get('tag') == 'artemis_status' }}
+
+actions:
+  - action: button.press
+    target:
+      entity_id: button.cycle_artemis_status
+
+mode: queued
+max: 5
 ```
 
-Home Assistant updates the existing notification instead of creating a new one each time.
+After ARTEMIS confirms the write, the integration refreshes the personal planning and centre counter. The persistent notification then updates automatically from the sensor state change.
 
-`alert_once: true` keeps those updates silent, while `persistent: true` and `sticky: true` make the notification suitable as a small always-available ARTEMIS status indicator.
-
-### Example use
-
-```text
-🚒 3 dispo · DI1 > 14:30 > IND
-```
-
-or, when the next change is on another day:
-
-```text
-🚒 3 dispo · AS1 > 06/10 07:00 > IND
-```
-
-This gives a quick view of both your own availability and the current station availability without opening ARTEMIS or Smartemis.
+The complete example is also available in [`automation_persistent_status.example.yaml`](automation_persistent_status.example.yaml).
 
 ## Installation with HACS
 
@@ -363,7 +428,8 @@ This integration deliberately keeps persistent entities minimal:
 
 - other firefighters are represented only through the aggregate available-personnel counter;
 - operation addresses and details are emitted in the `artemis_new_intervention` event for notification/automation use;
-- the integration does not create a permanent address/history sensor.
+- the integration does not create a permanent address/history sensor;
+- optional status writes are restricted to the authenticated user's personal planning and the `IND` / `DI1` / `AS1` cycle.
 
 Home Assistant stores config-entry credentials locally. Protect:
 
@@ -384,6 +450,7 @@ The initial implementation was built from an SDIS 39 ARTEMIS WebEvo deployment a
 ```text
 api/personPlanning/initData
 api/personPlanning/getPlanning
+api/planningStaff/saveStaff
 api/planningCounters/getCounters
 api/synopticOperations/initData
 api/synopticOperations

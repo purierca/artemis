@@ -21,3 +21,6 @@ CENTER_COUNTER_UPDATE_INTERVAL = timedelta(seconds=30)
 MAX_LOOKAHEAD_WEEKS = 8
 
 UNAVAILABLE_STATUS_CODES = {"IND", "IN"}
+
+# One-button personal availability cycle. Only these states are ever written.
+STATUS_CYCLE = ("IND", "DI1", "AS1")

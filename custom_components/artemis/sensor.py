@@ -49,12 +49,15 @@ class ArtemisStatusSensor(CoordinatorEntity[ArtemisPlanningCoordinator], SensorE
     @property
     def extra_state_attributes(self) -> dict:
         data = self.coordinator.data
+        next_status = self.coordinator.effective_next_status
+        next_change = self.coordinator.effective_next_change
         return {
             "code": data.current.code if data.current else None,
             "depuis": data.current_since,
-            "prochain_statut": data.next_status.name if data.next_status else None,
-            "prochain_code": data.next_status.code if data.next_status else None,
-            "prochain_changement": data.next_change,
+            "prochain_statut": next_status.name if next_status else None,
+            "prochain_code": next_status.code if next_status else None,
+            "prochain_changement": next_change,
+            "override_actif": self.coordinator.status_override_active,
             "personne": data.staff_name,
             "centre": data.unit_id,
             "horizon_semaines": data.lookahead_weeks,
@@ -72,19 +75,23 @@ class ArtemisNextChangeSensor(CoordinatorEntity[ArtemisPlanningCoordinator], Sen
 
     @property
     def native_value(self) -> str | None:
-        data = self.coordinator.data
-        if data.next_status is None or data.next_change is None:
+        next_status = self.coordinator.effective_next_status
+        next_change = self.coordinator.effective_next_change
+        if next_status is None or next_change is None:
             return None
-        return f"{data.next_status.code} · {data.next_change.strftime('%d/%m %H:%M')}"
+        return f"{next_status.code} · {next_change.strftime('%d/%m %H:%M')}"
 
     @property
     def extra_state_attributes(self) -> dict:
         data = self.coordinator.data
+        next_status = self.coordinator.effective_next_status
+        next_change = self.coordinator.effective_next_change
         return {
             "statut_actuel": data.current.name if data.current else None,
-            "prochain_statut": data.next_status.name if data.next_status else None,
-            "prochain_code": data.next_status.code if data.next_status else None,
-            "date": data.next_change,
+            "prochain_statut": next_status.name if next_status else None,
+            "prochain_code": next_status.code if next_status else None,
+            "date": next_change,
+            "override_actif": self.coordinator.status_override_active,
             "horizon_semaines": data.lookahead_weeks,
         }
 
