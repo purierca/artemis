@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented here.
 
+## 0.3.0
+
+### Added
+
+- Structured intervention lifecycle event `artemis_intervention_update`.
+- Lifecycle values `snapshot`, `new`, `updated`, and `ended`, plus an `active` boolean.
+- Structured `fire_units_data`, `vehicles_data`, and `external_services_data` fields so notification automations can format operation data freely.
+- Persistent Android intervention-notification example that updates in place while an operation is active and becomes dismissible when it ends.
+
+### Behaviour
+
+- `artemis_new_intervention` is preserved for backward compatibility and still fires only for newly seen operations.
+- Active operations present when Home Assistant starts emit a lifecycle `snapshot`, not a false new-intervention event.
+- When an operation disappears from the active synoptic, the lifecycle event reports `active: false` and retains the last operation payload so the final mobile notification can display the last known vehicles and states.
+
 ## 0.2.0
 
 ### Added

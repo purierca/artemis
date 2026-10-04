@@ -14,6 +14,7 @@ CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 
 EVENT_NEW_INTERVENTION = "artemis_new_intervention"
+EVENT_INTERVENTION_UPDATE = "artemis_intervention_update"
 
 PLANNING_UPDATE_INTERVAL = timedelta(minutes=5)
 OPERATIONS_UPDATE_INTERVAL = timedelta(seconds=15)

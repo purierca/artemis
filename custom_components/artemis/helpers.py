@@ -381,13 +381,36 @@ def operation_addresses(operation: dict[str, Any]) -> list[str]:
     return addresses
 
 
-def _state_label(item: dict[str, Any]) -> str:
+def _state_parts(item: dict[str, Any]) -> tuple[str, str, str]:
+    """Return state code, name and a compact display label."""
     state = item.get("state") or {}
+    if not isinstance(state, dict):
+        return "", "", str(state or "").strip()
     code = str(state.get("code") or "").strip()
     name = str(state.get("name") or "").strip()
     if code and name and code != name:
-        return f"{code} – {name}"
-    return name or code
+        label = f"{code} \u2013 {name}"
+    else:
+        label = name or code
+    return code, name, label
+
+
+def _state_label(item: dict[str, Any]) -> str:
+    """Return a compact state label for backward-compatible string fields."""
+    return _state_parts(item)[2]
+
+
+def _unit_label(unit: Any) -> str:
+    """Return the best centre/unit label exposed by ARTEMIS."""
+    if isinstance(unit, dict):
+        for key in ("shortname", "shortName", "code", "name", "id"):
+            value = unit.get(key)
+            if value not in (None, ""):
+                return str(value).strip()
+        return ""
+    if unit not in (None, ""):
+        return str(unit).strip()
+    return ""
 
 
 def operation_identifier(operation: dict[str, Any]) -> str:
@@ -399,8 +422,13 @@ def operation_identifier(operation: dict[str, Any]) -> str:
     return "unknown"
 
 
-def operation_event_data(operation: dict[str, Any]) -> dict[str, Any]:
-    """Build concise event data and a readable notification message."""
+def operation_event_data(
+    operation: dict[str, Any],
+    *,
+    lifecycle: str = "updated",
+    active: bool = True,
+) -> dict[str, Any]:
+    """Build structured operation data plus backward-compatible text fields."""
     operation_id = operation_identifier(operation)
     number = str(
         operation.get("number")
@@ -410,67 +438,138 @@ def operation_event_data(operation: dict[str, Any]) -> dict[str, Any]:
     )
     disaster = str(operation.get("disasterLabel") or "Intervention").strip()
     addresses = operation_addresses(operation)
-    address = addresses[0] if addresses else "Adresse non communiquée"
-    created = operation.get("dateStartRdv") if operation.get("typeCode") == "D1" else operation.get("dateCreation")
-    op_state = _state_label(operation)
+    address = addresses[0] if addresses else "Adresse non communiquee"
+    created = (
+        operation.get("dateStartRdv")
+        if operation.get("typeCode") == "D1"
+        else operation.get("dateCreation")
+    )
+    state_code, state_name, op_state = _state_parts(operation)
 
     fire_units: list[str] = []
+    fire_units_data: list[dict[str, str]] = []
+    unit_labels: dict[str, str] = {}
     for unit in operation.get("fireUnits") or []:
         if not isinstance(unit, dict):
             continue
-        label = str(unit.get("shortname") or unit.get("name") or unit.get("id") or "Centre")
-        state = _state_label(unit)
-        if state:
-            label = f"{label} ({state})"
-        fire_units.append(label)
+        label = _unit_label(unit) or "Centre"
+        unit_state_code, unit_state_name, unit_state = _state_parts(unit)
+        display = f"{label} ({unit_state})" if unit_state else label
+        fire_units.append(display)
+        fire_units_data.append(
+            {
+                "id": str(unit.get("id") or ""),
+                "code": str(unit.get("code") or ""),
+                "name": str(unit.get("name") or ""),
+                "shortname": str(unit.get("shortname") or unit.get("shortName") or ""),
+                "label": label,
+                "state": unit_state,
+                "state_code": unit_state_code,
+                "state_name": unit_state_name,
+            }
+        )
+        for key in ("id", "code", "name", "shortname", "shortName"):
+            value = unit.get(key)
+            if value not in (None, ""):
+                unit_labels[str(value)] = label
 
     vehicles: list[str] = []
+    vehicles_data: list[dict[str, str]] = []
     for vehicle in operation.get("vehicles") or []:
         if not isinstance(vehicle, dict):
             continue
-        name = " ".join(
-            part
-            for part in (
-                str(vehicle.get("ack") or "").strip(),
-                str(vehicle.get("name") or vehicle.get("id") or "Engin").strip(),
-            )
-            if part
-        )
+
+        vehicle_name = str(vehicle.get("name") or vehicle.get("ack") or vehicle.get("id") or "Engin").strip()
+        ack = str(vehicle.get("ack") or "").strip()
         vehicle_type = vehicle.get("type") or {}
-        type_name = str(vehicle_type.get("name") or "").strip() if isinstance(vehicle_type, dict) else ""
-        state = _state_label(vehicle)
+        type_name = (
+            str(vehicle_type.get("name") or "").strip()
+            if isinstance(vehicle_type, dict)
+            else str(vehicle_type or "").strip()
+        )
+        vehicle_state_code, vehicle_state_name, vehicle_state = _state_parts(vehicle)
         eta = str(vehicle.get("estimatedTime") or "").strip()
         gfo = " ".join(
             str(vehicle.get(key) or "").strip()
             for key in ("gfoCode", "gfoLevel")
             if vehicle.get(key)
         )
-        extras = [part for part in (type_name, state, f"ETA {eta}" if eta else "", gfo) if part]
+
+        owner = vehicle.get("ownerFireUnit")
+        center = _unit_label(owner)
+        if center and center in unit_labels:
+            center = unit_labels[center]
+        elif isinstance(owner, dict):
+            for key in ("id", "code", "name", "shortname", "shortName"):
+                value = owner.get(key)
+                if value not in (None, "") and str(value) in unit_labels:
+                    center = unit_labels[str(value)]
+                    break
+
+        display_name = vehicle_name
+        if ack and ack not in vehicle_name:
+            display_name = f"{ack} {vehicle_name}"
+        extras = [
+            part
+            for part in (
+                type_name,
+                vehicle_state,
+                f"ETA {eta}" if eta else "",
+                gfo,
+            )
+            if part
+        ]
+        display = display_name
         if extras:
-            name = f"{name} — " + " · ".join(extras)
-        vehicles.append(name)
+            display = f"{display} - " + " | ".join(extras)
+        vehicles.append(display)
+        vehicles_data.append(
+            {
+                "id": str(vehicle.get("id") or ""),
+                "center": center,
+                "name": vehicle_name,
+                "ack": ack,
+                "type": type_name,
+                "state": vehicle_state,
+                "state_code": vehicle_state_code,
+                "state_name": vehicle_state_name,
+                "estimated_time": eta,
+                "gfo": gfo,
+            }
+        )
 
     external_services: list[str] = []
+    external_services_data: list[dict[str, str]] = []
     for service in operation.get("externalServices") or []:
         if not isinstance(service, dict):
             continue
         label = str(service.get("name") or service.get("id") or "Service")
-        state = _state_label(service)
-        if state:
-            label = f"{label} ({state})"
-        external_services.append(label)
+        service_state_code, service_state_name, service_state = _state_parts(service)
+        display = f"{label} ({service_state})" if service_state else label
+        external_services.append(display)
+        external_services_data.append(
+            {
+                "id": str(service.get("id") or ""),
+                "name": label,
+                "state": service_state,
+                "state_code": service_state_code,
+                "state_name": service_state_name,
+            }
+        )
 
-    lines = [f"📍 {address}", f"N° {number}" + (f" · {created}" if created else "")]
+    # Backward-compatible prebuilt text. New automations should normally use
+    # the structured fields above instead of depending on this formatting.
+    lines = [f"\U0001f4cd {address}", f"N\u00b0 {number}" + (f" \u00b7 {created}" if created else "")]
     if op_state:
-        lines.append(f"État : {op_state}")
+        lines.append(f"\u00c9tat : {op_state}")
     if len(addresses) > 1:
         lines.append("Autres adresses : " + " ; ".join(addresses[1:]))
     if fire_units:
-        lines.extend(("", "Centres", *[f"• {item}" for item in fire_units]))
+        lines.extend(("", "Centres", *[f"\u2022 {item}" for item in fire_units]))
     if vehicles:
-        lines.extend(("", "Engins", *[f"• {item}" for item in vehicles]))
+        lines.extend(("", "Engins", *[f"\u2022 {item}" for item in vehicles]))
     if external_services:
-        lines.extend(("", "Services", *[f"• {item}" for item in external_services]))
+        lines.extend(("", "Services", *[f"\u2022 {item}" for item in external_services]))
 
     return {
         "id": operation_id,
@@ -480,12 +579,17 @@ def operation_event_data(operation: dict[str, Any]) -> dict[str, Any]:
         "addresses": addresses,
         "created": created,
         "state": op_state,
+        "state_code": state_code,
+        "state_name": state_name,
+        "active": active,
+        "lifecycle": lifecycle,
         "fire_units": fire_units,
+        "fire_units_data": fire_units_data,
         "vehicles": vehicles,
+        "vehicles_data": vehicles_data,
         "external_services": external_services,
-        "title": f"🚒 Nouvelle intervention — {disaster}",
+        "external_services_data": external_services_data,
+        "title": f"\U0001f692 Nouvelle intervention - {disaster}",
         "message": "\n".join(lines),
-        # Kept separate so a user can use HTML notifications later without
-        # changing the integration. The default automation uses plain text.
-        "title_html": f"🚒 Nouvelle intervention — {escape(disaster)}",
+        "title_html": f"\U0001f692 Nouvelle intervention - {escape(disaster)}",
     }

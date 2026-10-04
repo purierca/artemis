@@ -24,6 +24,7 @@ from .api import (
 )
 from .const import (
     CENTER_COUNTER_UPDATE_INTERVAL,
+    EVENT_INTERVENTION_UPDATE,
     EVENT_NEW_INTERVENTION,
     MAX_LOOKAHEAD_WEEKS,
     OPERATIONS_UPDATE_INTERVAL,
@@ -425,7 +426,7 @@ class ArtemisCenterAvailabilityCoordinator(
 
 
 class ArtemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
-    """Coordinate live ARTEMIS operations and emit one event per new operation."""
+    """Coordinate live ARTEMIS operations and emit lifecycle events."""
 
     def __init__(
         self,
@@ -447,6 +448,7 @@ class ArtemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
         self._seeded = False
         self._seen: set[str] = set()
         self._seen_order: deque[str] = deque(maxlen=2000)
+        self._active_operations: dict[str, dict] = {}
 
     def _remember(self, operation_id: str) -> None:
         if operation_id in self._seen:
@@ -457,6 +459,12 @@ class ArtemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
         self._seen_order.append(operation_id)
         self._seen.add(operation_id)
 
+    def _fire_lifecycle(self, operation: dict, *, lifecycle: str, active: bool) -> None:
+        self.hass.bus.async_fire(
+            EVENT_INTERVENTION_UPDATE,
+            operation_event_data(operation, lifecycle=lifecycle, active=active),
+        )
+
     async def _async_update_data(self) -> OperationsSnapshot:
         try:
             payload = await self.api.async_operations()
@@ -465,22 +473,60 @@ class ArtemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
                 for operation in (payload.get("operations") or [])
                 if isinstance(operation, dict)
             )
+            current = {
+                operation_identifier(operation): operation
+                for operation in operations
+            }
 
             if not self._seeded:
-                for operation in operations:
-                    self._remember(operation_identifier(operation))
+                for operation_id, operation in current.items():
+                    self._remember(operation_id)
+                    # Recreate or refresh persistent operation notifications after
+                    # a Home Assistant restart without claiming the operation is new.
+                    self._fire_lifecycle(
+                        operation,
+                        lifecycle="snapshot",
+                        active=True,
+                    )
                 self._seeded = True
             else:
-                for operation in operations:
-                    operation_id = operation_identifier(operation)
-                    if operation_id in self._seen:
-                        continue
-                    self._remember(operation_id)
-                    self.hass.bus.async_fire(
-                        EVENT_NEW_INTERVENTION,
-                        operation_event_data(operation),
+                previous_ids = set(self._active_operations)
+                current_ids = set(current)
+
+                for operation_id, operation in current.items():
+                    previous = self._active_operations.get(operation_id)
+                    if previous is None:
+                        is_new = operation_id not in self._seen
+                        self._remember(operation_id)
+                        if is_new:
+                            self.hass.bus.async_fire(
+                                EVENT_NEW_INTERVENTION,
+                                operation_event_data(
+                                    operation,
+                                    lifecycle="new",
+                                    active=True,
+                                ),
+                            )
+                        self._fire_lifecycle(
+                            operation,
+                            lifecycle="new" if is_new else "updated",
+                            active=True,
+                        )
+                    elif operation != previous:
+                        self._fire_lifecycle(
+                            operation,
+                            lifecycle="updated",
+                            active=True,
+                        )
+
+                for operation_id in previous_ids - current_ids:
+                    self._fire_lifecycle(
+                        self._active_operations[operation_id],
+                        lifecycle="ended",
+                        active=False,
                     )
 
+            self._active_operations = current
             return OperationsSnapshot(count=len(operations), operations=operations)
 
         except ArtemisAuthError as err:

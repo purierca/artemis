@@ -26,3 +26,7 @@ This integration is intended to use only data that the configured ARTEMIS accoun
 ## Personal planning writes
 
 Version 0.2.0 adds an optional one-button personal status cycle. This is a real write to ARTEMIS, not a Home Assistant-only helper. The implementation is intentionally limited to the authenticated user, the `IND` / `DI1` / `AS1` cycle, and the preserved next planned status boundary. Do not expose the button or its notification action to untrusted Home Assistant users.
+
+## Home Assistant event data
+
+`artemis_new_intervention` and `artemis_intervention_update` can contain operational addresses, resource names and states. Treat Home Assistant event traces, automation traces, logs and notification history as sensitive operational data.

@@ -18,7 +18,8 @@ It connects to an authorized ARTEMIS WebEvo account and exposes useful firefight
 - Shows the **number of personnel currently available at your ARTEMIS centre**, using ARTEMIS' native centre counter.
 - Shows the number of **active interventions** and whether at least one intervention is active.
 - Fires an `artemis_new_intervention` Home Assistant event when a new operation appears.
-- Provides a notification-ready event payload with the operation details exposed by ARTEMIS, including address, units, vehicles, states and external services when available.
+- Fires `artemis_intervention_update` lifecycle events for operation snapshots, updates and completion.
+- Provides structured operation payloads so Home Assistant notifications can format address, units, vehicles, states and external services freely.
 - Automatically logs in through CAS and renews expired ARTEMIS sessions.
 - Exposes a one-press **personal status cycle button**: `IND -> DI1 -> AS1 -> IND`.
 - Status writes are deliberately limited to **your own personal planning** and only until the next status change that was already planned in ARTEMIS.
@@ -140,24 +141,33 @@ The centre counter is refreshed every 30 seconds.
 
 The integration polls the live ARTEMIS operations synoptic using the refresh interval announced by ARTEMIS, with a minimum of 15 seconds.
 
-Two entities represent the current state:
+Two entities represent the current aggregate state:
 
 ```text
 sensor.active_interventions_count_artemis
 binary_sensor.active_interventions_artemis
 ```
 
-Both use `mdi:fire-alert`.
+### Structured intervention lifecycle event
 
-When a previously unseen operation appears, Home Assistant fires:
+For notification and automation design, listen to:
 
 ```text
-artemis_new_intervention
+artemis_intervention_update
 ```
 
-The first successful synoptic load after startup only seeds the current IDs. Existing operations therefore do **not** generate a burst of false "new intervention" notifications after a restart.
+This event is emitted when an active operation is first observed, when data exposed by ARTEMIS changes, and when the operation disappears from the active synoptic. It also emits a `snapshot` for operations already active when Home Assistant starts.
 
-Typical event data:
+`lifecycle` can be:
+
+- `snapshot`: already active when the integration starts;
+- `new`: a newly observed operation;
+- `updated`: ARTEMIS changed the operation, vehicle or unit data;
+- `ended`: the operation disappeared from the active synoptic.
+
+The event also exposes `active: true/false`. An `ended` lifecycle is inferred from disappearance from the live active-operation list; it is not an official replacement for the operational status recorded in ARTEMIS. The final event keeps the last known operation payload so a mobile notification can show the last known resources and states.
+
+Typical structured event data:
 
 ```yaml
 id: "26000042"
@@ -165,67 +175,130 @@ number: "26000042"
 disaster: "SECOURS A PERSONNE"
 address: "BEAUFORT - 12 RUE EXEMPLE - 39190"
 created: "2026-09-30T11:43:00"
-state: "EC – EN COURS"
-fire_units:
-  - "BEAUF (PA – PARTI)"
-vehicles:
-  - "VSAV BEAUFORT — VSAV · PA – PARTI · ETA 11:48"
-title: "🚒 Nouvelle intervention — SECOURS A PERSONNE"
-message: |-
-  📍 BEAUFORT - 12 RUE EXEMPLE - 39190
-  N° 26000042 · 2026-09-30T11:43:00
-  ...
+state: "EC - EN COURS"
+state_code: "EC"
+state_name: "EN COURS"
+active: true
+lifecycle: updated
+fire_units_data:
+  - id: "BEA"
+    label: "BEAUF"
+    state_code: "PA"
+    state_name: "PARTI"
+vehicles_data:
+  - id: "123"
+    center: "BEAUF"
+    name: "VLTU 01"
+    type: "VLTU"
+    state_code: "PA"
+    state_name: "PARTI"
+    estimated_time: "11:48"
+external_services_data: []
 ```
 
-The exact fields depend on the ARTEMIS server and the operation.
+The exact fields depend on what the ARTEMIS server exposes for the operation. The older string fields (`fire_units`, `vehicles`, `external_services`) and the prebuilt `title` / `message` fields are kept for backward compatibility. You do not need to use the prebuilt message: the structured fields are intended for fully custom Home Assistant notifications.
 
-## Recommended mobile notification automation
+The existing event remains available:
 
-A notification automation is strongly recommended because the integration itself deliberately exposes an event instead of deciding how each Home Assistant installation should notify users.
+```text
+artemis_new_intervention
+```
 
-Replace `notify.mobile_app_TON_TELEPHONE` with the notify action of your Home Assistant Companion device:
+It fires only for genuinely new operation IDs and is retained for existing automations.
+
+### Persistent, live-updating Android intervention notification
+
+This example creates one notification per operation. While the operation is active, the notification is persistent and is updated in place whenever ARTEMIS changes its state or resources. When the operation ends, the same notification is updated to show `Terminée`, becomes dismissible, and is left on the phone until the user removes it.
+
+Replace `notify.mobile_app_TON_TELEPHONE` with your Home Assistant Companion notification service.
 
 ```yaml
-alias: "ARTEMIS - Nouvelle intervention"
-description: "Notification mobile lors d'une nouvelle intervention ARTEMIS"
+alias: "ARTEMIS - Suivi intervention"
+description: "Notification persistante mise à jour pendant toute l'intervention"
 mode: queued
-max: 10
+max: 20
 
 triggers:
   - trigger: event
-    event_type: artemis_new_intervention
+    event_type: artemis_intervention_update
 
 conditions: []
 
 actions:
-  - action: notify.mobile_app_TON_TELEPHONE
-    data:
-      title: "{{ trigger.event.data.title }}"
-      message: "{{ trigger.event.data.message }}"
-      data:
-        channel: "Interventions SPV"
-        importance: high
-        priority: high
-        ttl: 0
-        notification_icon: "mdi:fire-alert"
-        tag: "artemis_{{ trigger.event.data.id }}"
-        actions:
-          - action: "URI"
-            title: "Ouvrir Smartemis"
-            uri: "app://com.sis.smartemis"
+  - variables:
+      notification_title: >-
+        🚒 {{ trigger.event.data.disaster }}
+      notification_message: |-
+        {{ trigger.event.data.address }}
+        État : {{
+          (trigger.event.data.state_name or trigger.event.data.state_code or trigger.event.data.state or 'En cours')
+          if trigger.event.data.active
+          else 'Terminée'
+        }}
+        {% for vehicle in trigger.event.data.vehicles_data %}
+        {{ vehicle.center or 'Centre' }} : {{ vehicle.name }} [{{ vehicle.state_name or vehicle.state_code or vehicle.state or '?' }}]
+        {% endfor %}
+      notification_tag: >-
+        artemis_intervention_{{ trigger.event.data.id }}
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.active }}"
+        sequence:
+          - action: notify.mobile_app_TON_TELEPHONE
+            data:
+              title: "{{ notification_title }}"
+              message: "{{ notification_message }}"
+              data:
+                tag: "{{ notification_tag }}"
+                group: artemis_interventions
+                persistent: true
+                sticky: true
+                alert_once: true
+                importance: high
+                priority: high
+                ttl: 0
+                notification_icon: mdi:fire-alert
+                channel: Interventions SPV
+                clickAction: "app://com.sis.smartemis"
+    default:
+      - action: notify.mobile_app_TON_TELEPHONE
+        data:
+          title: "{{ notification_title }}"
+          message: "{{ notification_message }}"
+          data:
+            tag: "{{ notification_tag }}"
+            group: artemis_interventions
+            persistent: false
+            sticky: false
+            alert_once: true
+            notification_icon: mdi:fire-alert
+            channel: Interventions SPV
+            clickAction: "app://com.sis.smartemis"
 ```
 
-The notification content generated by the integration intentionally uses only a couple of useful emojis, for example:
+Example while active:
 
 ```text
-🚒 Nouvelle intervention — SECOURS A PERSONNE
-
-📍 BEAUFORT - 12 RUE EXEMPLE - 39190
-N° 26000042 · 11:43
-...
+🚒 SECOURS A PERSONNE
+BEAUFORT - 12 RUE EXEMPLE - 39190
+État : EN COURS
+BEAUF : VLTU 01 [PARTI]
+BEAUF : VSAV 01 [SUR LES LIEUX]
 ```
 
-The same YAML is included in [`automation_notification.example.yaml`](automation_notification.example.yaml).
+Example after the operation disappears from the active synoptic:
+
+```text
+🚒 SECOURS A PERSONNE
+BEAUFORT - 12 RUE EXEMPLE - 39190
+État : Terminée
+BEAUF : VLTU 01 [RETOUR]
+BEAUF : VSAV 01 [RETOUR]
+```
+
+The same YAML is included in [`automation_intervention_status.example.yaml`](automation_intervention_status.example.yaml).
 
 ## Persistent Android status notification with a cycle action
 
@@ -427,7 +500,7 @@ ARTEMIS can contain sensitive personal and operational information.
 This integration deliberately keeps persistent entities minimal:
 
 - other firefighters are represented only through the aggregate available-personnel counter;
-- operation addresses and details are emitted in the `artemis_new_intervention` event for notification/automation use;
+- operation addresses and details are emitted in the `artemis_new_intervention` and `artemis_intervention_update` events for notification/automation use;
 - the integration does not create a permanent address/history sensor;
 - optional status writes are restricted to the authenticated user's personal planning and the `IND` / `DI1` / `AS1` cycle.
 
@@ -474,9 +547,9 @@ Verify that the account can sign into ARTEMIS WebEvo normally. If another deploy
 
 Confirm that the Home Assistant host can reach the ARTEMIS WebEvo HTTPS endpoint and that DNS/TLS work from the Home Assistant environment.
 
-### No notification after restart even though an intervention already exists
+### Intervention already active after a Home Assistant restart
 
-This is intentional. Operations already present during the initial poll are treated as existing operations. Only IDs appearing afterwards trigger `artemis_new_intervention`.
+Existing operations still do **not** trigger a false `artemis_new_intervention`. They do emit an `artemis_intervention_update` event with `lifecycle: snapshot`, allowing a persistent status notification to be recreated or refreshed after restart.
 
 ### Centre availability is unavailable
 

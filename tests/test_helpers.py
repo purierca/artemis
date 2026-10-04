@@ -207,14 +207,16 @@ class OperationTests(unittest.TestCase):
             },
             "fireUnits": [
                 {
+                    "id": "BEA",
                     "shortname": "BEAUF",
                     "state": {"code": "PA", "name": "PARTI"},
                 }
             ],
             "vehicles": [
                 {
-                    "name": "VSAV BEAUFORT",
-                    "type": {"name": "VSAV"},
+                    "name": "VLTU 01",
+                    "ownerFireUnit": {"id": "BEA"},
+                    "type": {"name": "VLTU"},
                     "state": {"code": "PA", "name": "PARTI"},
                     "estimatedTime": "11:48",
                 }
@@ -223,8 +225,32 @@ class OperationTests(unittest.TestCase):
         data = helpers.operation_event_data(operation)
         self.assertEqual(data["id"], "42")
         self.assertIn("🚒", data["title"])
-        self.assertIn("📍", data["message"])
-        self.assertIn("VSAV BEAUFORT", data["message"])
+        self.assertTrue(data["message"].startswith("\U0001f4cd "))
+        self.assertIn("VLTU 01", data["message"])
+        self.assertTrue(data["active"])
+        self.assertEqual(data["lifecycle"], "updated")
+        self.assertEqual(data["state_code"], "EC")
+        self.assertEqual(data["state_name"], "EN COURS")
+        self.assertEqual(data["vehicles_data"][0]["center"], "BEAUF")
+        self.assertEqual(data["vehicles_data"][0]["name"], "VLTU 01")
+        self.assertEqual(data["vehicles_data"][0]["state_code"], "PA")
+
+    def test_ended_operation_keeps_last_payload_but_marks_inactive(self) -> None:
+        operation = {
+            "id": 43,
+            "disasterLabel": "FEU",
+            "state": {"code": "EC", "name": "EN COURS"},
+            "vehicles": [{"name": "FPT 01", "state": {"code": "RE", "name": "RETOUR"}}],
+        }
+        data = helpers.operation_event_data(
+            operation,
+            lifecycle="ended",
+            active=False,
+        )
+        self.assertFalse(data["active"])
+        self.assertEqual(data["lifecycle"], "ended")
+        self.assertEqual(data["state"], "EC \u2013 EN COURS")
+        self.assertEqual(data["vehicles_data"][0]["state"], "RE \u2013 RETOUR")
 
 
 if __name__ == "__main__":

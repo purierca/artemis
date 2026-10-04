@@ -1,0 +1,63 @@
+alias: "ARTEMIS - Suivi intervention"
+description: "Notification persistante mise à jour pendant toute l'intervention"
+mode: queued
+max: 20
+
+triggers:
+  - trigger: event
+    event_type: artemis_intervention_update
+
+conditions: []
+
+actions:
+  - variables:
+      notification_title: >-
+        🚒 {{ trigger.event.data.disaster }}
+      notification_message: |-
+        {{ trigger.event.data.address }}
+        État : {{
+          (trigger.event.data.state_name or trigger.event.data.state_code or trigger.event.data.state or 'En cours')
+          if trigger.event.data.active
+          else 'Terminée'
+        }}
+        {% for vehicle in trigger.event.data.vehicles_data %}
+        {{ vehicle.center or 'Centre' }} : {{ vehicle.name }} [{{ vehicle.state_name or vehicle.state_code or vehicle.state or '?' }}]
+        {% endfor %}
+      notification_tag: >-
+        artemis_intervention_{{ trigger.event.data.id }}
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.active }}"
+        sequence:
+          - action: notify.mobile_app_TON_TELEPHONE
+            data:
+              title: "{{ notification_title }}"
+              message: "{{ notification_message }}"
+              data:
+                tag: "{{ notification_tag }}"
+                group: artemis_interventions
+                persistent: true
+                sticky: true
+                alert_once: true
+                importance: high
+                priority: high
+                ttl: 0
+                notification_icon: mdi:fire-alert
+                channel: Interventions SPV
+                clickAction: "app://com.sis.smartemis"
+    default:
+      - action: notify.mobile_app_TON_TELEPHONE
+        data:
+          title: "{{ notification_title }}"
+          message: "{{ notification_message }}"
+          data:
+            tag: "{{ notification_tag }}"
+            group: artemis_interventions
+            persistent: false
+            sticky: false
+            alert_once: true
+            notification_icon: mdi:fire-alert
+            channel: Interventions SPV
+            clickAction: "app://com.sis.smartemis"
