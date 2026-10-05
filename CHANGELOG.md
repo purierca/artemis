@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented here.
 
+## 0.5.2
+
+### Fixed
+
+- Remove obsolete entity-registry entries from pre-0.5 releases during setup, so upgrades no longer leave retired entities visible as permanently unavailable in Home Assistant.
+- Cleanup covers the old next-change, available-personnel, active-intervention-count and binary-sensor entities while preserving the current `sensor.statut_artemis`, `sensor.interventions_artemis` and `button.cycle_artemis_status`.
+
 ## 0.5.0
 
 ### Changed

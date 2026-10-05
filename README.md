@@ -7,7 +7,7 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo**, initially d
 
 ## What it does
 
-Version **0.5.0** deliberately keeps the Home Assistant surface small:
+Version **0.5.2** deliberately keeps the Home Assistant surface small:
 
 | Entity | Purpose |
 | --- | --- |
@@ -15,7 +15,7 @@ Version **0.5.0** deliberately keeps the Home Assistant surface small:
 | `sensor.interventions_artemis` | Number of currently active interventions + structured active-intervention snapshot |
 | `button.cycle_artemis_status` | `IND -> DI1 -> AS1 -> IND`, only until the next already-planned change |
 
-There are no separate next-change, availability, active-operation-count or binary sensors in 0.5.0. The useful data is grouped into the two sensors above.
+There are no separate next-change, availability, active-operation-count or binary sensors in 0.5.x. The useful data is grouped into the two sensors above. Upgrades from older releases automatically remove the retired entity-registry entries so they do not remain visible as unavailable entities.
 
 ## Architecture
 
