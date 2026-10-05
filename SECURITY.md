@@ -11,7 +11,7 @@ Never include any of the following in a public GitHub issue, discussion, screens
 - `JSESSIONID`, `MOD_AUTH_CAS_S`, `CASTGC` or other session cookies;
 - the `ssoSha1` hand-off value;
 - personal information about firefighters;
-- addresses or details of active operations unless they have been fully anonymised.
+- addresses, GPS coordinates or resource details of active operations unless fully anonymised.
 
 If credentials were accidentally included in a HAR or issue, invalidate the session and change the password immediately.
 
@@ -25,8 +25,21 @@ This integration is intended to use only data that the configured ARTEMIS accoun
 
 ## Personal planning writes
 
-Version 0.2.0 adds an optional one-button personal status cycle. This is a real write to ARTEMIS, not a Home Assistant-only helper. The implementation is intentionally limited to the authenticated user, the `IND` / `DI1` / `AS1` cycle, and the preserved next planned status boundary. Do not expose the button or its notification action to untrusted Home Assistant users.
+`button.cycle_artemis_status` performs a real write to ARTEMIS, not a Home Assistant-only helper. The implementation is intentionally limited to the authenticated user's personal planning, the `IND` / `DI1` / `AS1` cycle, and the next planned status boundary that existed before the override.
 
-## Home Assistant event data
+The integration refuses ARTEMIS ubiquity/conflict confirmations rather than forcing them. Do not expose the button or notification action to untrusted Home Assistant users.
 
-`artemis_new_intervention` and `artemis_intervention_update` can contain operational addresses, resource names and states. Treat Home Assistant event traces, automation traces, logs and notification history as sensitive operational data.
+## Intervention sensor data
+
+`sensor.interventions_artemis` can expose operational addresses, GPS coordinates, vehicle names and states as Home Assistant attributes while an operation is active.
+
+Consider excluding it from Recorder:
+
+```yaml
+recorder:
+  exclude:
+    entities:
+      - sensor.interventions_artemis
+```
+
+Automation traces, logs and mobile notification history can also retain operational information. Treat them accordingly.

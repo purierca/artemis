@@ -40,17 +40,16 @@ class PlanningSnapshot:
 
 @dataclass(slots=True, frozen=True)
 class CenterAvailabilitySnapshot:
-    """Current centre availability counters."""
+    """Current native ARTEMIS centre availability counters."""
 
     available: int
     in_operation: int
-    counters: tuple[dict[str, Any], ...]
     unit_id: str
 
 
 @dataclass(slots=True, frozen=True)
 class OperationsSnapshot:
-    """Current operations state."""
+    """Current active ARTEMIS operations, normalized for Home Assistant."""
 
     count: int
     operations: tuple[dict[str, Any], ...]

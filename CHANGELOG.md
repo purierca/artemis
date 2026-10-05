@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented here.
 
+## 0.5.0
+
+### Changed
+
+- Reduced the Home Assistant entity surface to two sensors plus the existing status-cycle button:
+  - `sensor.statut_artemis`
+  - `sensor.interventions_artemis`
+  - `button.cycle_artemis_status`
+- Folded next status/change and native centre availability into attributes of `sensor.statut_artemis`.
+- Replaced intervention lifecycle events with one structured, polled `sensor.interventions_artemis` snapshot.
+- Removed the separate availability/intervention binary sensors and separate next-change/available-personnel/operation-count sensors.
+- Operations now use WebEvo's advertised refresh interval (minimum 15 seconds) and only publish a new Home Assistant snapshot when data actually changes.
+
+### Intervention tracking
+
+- `sensor.interventions_artemis` exposes structured intervention id, title, address, GPS/navigation URI, state and vehicles.
+- Notification lifecycle is intentionally handled in Home Assistant by comparing the previous and current sensor snapshots.
+- Added a single automation example that creates/updates a persistent notification while an intervention is active, marks it `Terminée` when it disappears from the active synoptic, keeps the final notification until the user dismisses it, opens Smartemis on the main tap, and exposes a `Naviguer` action.
+
+### Personal status
+
+- Preserved the safe `IND -> DI1 -> AS1 -> IND` write button and the original planned boundary across repeated presses and Home Assistant restarts.
+- Added `available_personnel`, `next_code`, `next_change`, `can_cycle` and `cycle_next_code` attributes to the compact status sensor.
+- Reworked the persistent status-notification example into one automation that both refreshes the notification and handles its dynamic cycle-status action button.
+
+### Breaking changes
+
+- Removed `artemis_new_intervention` and `artemis_intervention_update` as the primary automation interface. Use `sensor.interventions_artemis` instead.
+- Removed the old standalone next-change, available-personnel, active-operation-count and binary-sensor entities. Existing dashboards/automations using those entities need to be migrated to attributes of `sensor.statut_artemis` or `sensor.interventions_artemis`.
+
+## 0.3.1
+
+### Added
+
+- GPS-aware intervention payload fields: `latitude`, `longitude`, `has_coordinates`, `location_source`, and `location_data`.
+- Ready-to-use `navigation_uri` for mobile notification actions. It uses the ARTEMIS GPS point when available and falls back to the formatted intervention address.
+- `Naviguer` action in the persistent Android intervention notification example while preserving Smartemis as the main notification tap action.
+
+### Safety / compatibility
+
+- Only plausible WGS84 latitude/longitude values are accepted. Ambiguous projected `x`/`y` coordinates are ignored instead of being interpreted as GPS.
+- All existing `artemis_intervention_update` fields remain backward compatible.
+
 ## 0.3.0
 
 ### Added

@@ -17,6 +17,9 @@ errors: list[str] = []
 required = [
     ROOT / "README.md",
     ROOT / "hacs.json",
+    ROOT / "automation_status_notification.example.yaml",
+    ROOT / "automation_interventions.example.yaml",
+    ROOT / "dashboard_cycle_button.example.yaml",
     INTEGRATION / "__init__.py",
     INTEGRATION / "manifest.json",
     INTEGRATION / "brand" / "icon.png",
@@ -24,6 +27,17 @@ required = [
 for path in required:
     if not path.exists():
         errors.append(f"Missing required file: {path.relative_to(ROOT)}")
+
+
+obsolete = [
+    INTEGRATION / "binary_sensor.py",
+    ROOT / "automation_notification.example.yaml",
+    ROOT / "automation_persistent_status.example.yaml",
+    ROOT / "automation_intervention_status.example.yaml",
+]
+for path in obsolete:
+    if path.exists():
+        errors.append(f"Obsolete 0.5.0 file still present: {path.relative_to(ROOT)}")
 
 custom_dirs = [p for p in (ROOT / "custom_components").iterdir() if p.is_dir()]
 if len(custom_dirs) != 1:

@@ -20,7 +20,7 @@ from .coordinator import (
     ArtemisPlanningCoordinator,
 )
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
+PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
 
 
 @dataclass(slots=True)

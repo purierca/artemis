@@ -28,4 +28,4 @@ Update both:
 - `custom_components/artemis/manifest.json` -> `version`
 - `CHANGELOG.md`
 
-Then create a GitHub release whose tag matches the manifest version, for example `0.1.1`.
+Then create a GitHub release whose tag matches the manifest version, for example `0.5.1`.

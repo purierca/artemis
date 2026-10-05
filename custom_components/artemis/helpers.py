@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-from html import escape
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
@@ -381,23 +380,136 @@ def operation_addresses(operation: dict[str, Any]) -> list[str]:
     return addresses
 
 
-def _state_parts(item: dict[str, Any]) -> tuple[str, str, str]:
-    """Return state code, name and a compact display label."""
+
+def _coerce_coordinate(value: Any, *, latitude: bool) -> float | None:
+    """Return a valid WGS84 coordinate or None.
+
+    ARTEMIS deployments may expose coordinates using slightly different field
+    names. Only values that already look like WGS84 latitude/longitude are
+    accepted; projected X/Y coordinates are deliberately ignored.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        numeric = float(str(value).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if latitude and -90 <= numeric <= 90:
+        return numeric
+    if not latitude and -180 <= numeric <= 180:
+        return numeric
+    return None
+
+
+def operation_coordinates(operation: dict[str, Any]) -> tuple[float | None, float | None, str]:
+    """Extract the first WGS84 latitude/longitude pair exposed by ARTEMIS.
+
+    The live-operation schema is not identical across all WebEvo deployments,
+    so this supports common field names while avoiding ambiguous projected
+    ``x``/``y`` values. The returned source is informational only.
+    """
+    latitude_keys = (
+        "latitude",
+        "lat",
+        "gpsLatitude",
+        "latitudeGps",
+        "latitudeWgs84",
+        "latWgs84",
+    )
+    longitude_keys = (
+        "longitude",
+        "lon",
+        "lng",
+        "gpsLongitude",
+        "longitudeGps",
+        "longitudeWgs84",
+        "lonWgs84",
+        "lngWgs84",
+    )
+
+    def pair_from_dict(value: dict[str, Any]) -> tuple[float | None, float | None]:
+        lower = {str(key).lower(): item for key, item in value.items()}
+        lat = next(
+            (
+                _coerce_coordinate(lower.get(key.lower()), latitude=True)
+                for key in latitude_keys
+                if key.lower() in lower
+            ),
+            None,
+        )
+        lon = next(
+            (
+                _coerce_coordinate(lower.get(key.lower()), latitude=False)
+                for key in longitude_keys
+                if key.lower() in lower
+            ),
+            None,
+        )
+        if lat is not None and lon is not None:
+            return lat, lon
+
+        # GeoJSON Point: coordinates are [longitude, latitude].
+        coordinates = value.get("coordinates")
+        point_type = str(value.get("type") or "").lower()
+        if point_type == "point" and isinstance(coordinates, (list, tuple)) and len(coordinates) >= 2:
+            lon = _coerce_coordinate(coordinates[0], latitude=False)
+            lat = _coerce_coordinate(coordinates[1], latitude=True)
+            if lat is not None and lon is not None:
+                return lat, lon
+
+        return None, None
+
+    candidates: list[tuple[str, Any]] = [("operation", operation)]
+    if isinstance(operation.get("address"), dict):
+        candidates.append(("address", operation["address"]))
+    raw_addresses = operation.get("addresses") or []
+    if isinstance(raw_addresses, list):
+        candidates.extend(
+            (f"addresses[{index}]", item)
+            for index, item in enumerate(raw_addresses)
+            if isinstance(item, dict)
+        )
+
+    # Some deployments wrap coordinates in one of these objects.
+    for container_name in ("location", "position", "gps", "geometry", "coordinate"):
+        value = operation.get(container_name)
+        if isinstance(value, dict):
+            candidates.append((container_name, value))
+        address = operation.get("address")
+        if isinstance(address, dict) and isinstance(address.get(container_name), dict):
+            candidates.append((f"address.{container_name}", address[container_name]))
+
+    for source, candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        lat, lon = pair_from_dict(candidate)
+        if lat is not None and lon is not None:
+            return lat, lon, source
+
+    return None, None, ""
+
+
+def operation_navigation_uri(operation: dict[str, Any], address: str = "") -> str:
+    """Return an Android-friendly map URI for the operation location."""
+    from urllib.parse import quote_plus
+
+    latitude, longitude, _source = operation_coordinates(operation)
+    if latitude is not None and longitude is not None:
+        return f"geo:{latitude:.6f},{longitude:.6f}?q={latitude:.6f},{longitude:.6f}"
+    if address and address != "Adresse non communiquee":
+        return f"geo:0,0?q={quote_plus(address)}"
+    return ""
+
+def _state_parts(item: dict[str, Any]) -> tuple[str, str]:
+    """Return state code and name from a WebEvo object."""
     state = item.get("state") or {}
     if not isinstance(state, dict):
-        return "", "", str(state or "").strip()
-    code = str(state.get("code") or "").strip()
-    name = str(state.get("name") or "").strip()
-    if code and name and code != name:
-        label = f"{code} \u2013 {name}"
-    else:
-        label = name or code
-    return code, name, label
-
-
-def _state_label(item: dict[str, Any]) -> str:
-    """Return a compact state label for backward-compatible string fields."""
-    return _state_parts(item)[2]
+        value = str(state or "").strip()
+        return value, value
+    return (
+        str(state.get("code") or "").strip(),
+        str(state.get("name") or "").strip(),
+    )
 
 
 def _unit_label(unit: Any) -> str:
@@ -422,13 +534,13 @@ def operation_identifier(operation: dict[str, Any]) -> str:
     return "unknown"
 
 
-def operation_event_data(
-    operation: dict[str, Any],
-    *,
-    lifecycle: str = "updated",
-    active: bool = True,
-) -> dict[str, Any]:
-    """Build structured operation data plus backward-compatible text fields."""
+def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one active operation for the interventions sensor.
+
+    The sensor intentionally exposes structured data only. Notification wording
+    and lifecycle handling belong in Home Assistant automations, not in the
+    integration.
+    """
     operation_id = operation_identifier(operation)
     number = str(
         operation.get("number")
@@ -436,68 +548,32 @@ def operation_event_data(
         or operation.get("codeOperation")
         or operation_id
     )
-    disaster = str(operation.get("disasterLabel") or "Intervention").strip()
+    title = str(operation.get("disasterLabel") or "Intervention").strip()
     addresses = operation_addresses(operation)
     address = addresses[0] if addresses else "Adresse non communiquee"
-    created = (
-        operation.get("dateStartRdv")
-        if operation.get("typeCode") == "D1"
-        else operation.get("dateCreation")
-    )
-    state_code, state_name, op_state = _state_parts(operation)
+    latitude, longitude, _source = operation_coordinates(operation)
+    state_code, state_name = _state_parts(operation)
 
-    fire_units: list[str] = []
-    fire_units_data: list[dict[str, str]] = []
+    # Build a lookup so vehicle owner ids can be rendered as the human-readable
+    # centre short name exposed in the same operation payload.
     unit_labels: dict[str, str] = {}
     for unit in operation.get("fireUnits") or []:
         if not isinstance(unit, dict):
             continue
-        label = _unit_label(unit) or "Centre"
-        unit_state_code, unit_state_name, unit_state = _state_parts(unit)
-        display = f"{label} ({unit_state})" if unit_state else label
-        fire_units.append(display)
-        fire_units_data.append(
-            {
-                "id": str(unit.get("id") or ""),
-                "code": str(unit.get("code") or ""),
-                "name": str(unit.get("name") or ""),
-                "shortname": str(unit.get("shortname") or unit.get("shortName") or ""),
-                "label": label,
-                "state": unit_state,
-                "state_code": unit_state_code,
-                "state_name": unit_state_name,
-            }
-        )
+        label = _unit_label(unit)
         for key in ("id", "code", "name", "shortname", "shortName"):
             value = unit.get(key)
-            if value not in (None, ""):
+            if value not in (None, "") and label:
                 unit_labels[str(value)] = label
 
-    vehicles: list[str] = []
-    vehicles_data: list[dict[str, str]] = []
+    vehicles: list[dict[str, str]] = []
     for vehicle in operation.get("vehicles") or []:
         if not isinstance(vehicle, dict):
             continue
 
-        vehicle_name = str(vehicle.get("name") or vehicle.get("ack") or vehicle.get("id") or "Engin").strip()
-        ack = str(vehicle.get("ack") or "").strip()
-        vehicle_type = vehicle.get("type") or {}
-        type_name = (
-            str(vehicle_type.get("name") or "").strip()
-            if isinstance(vehicle_type, dict)
-            else str(vehicle_type or "").strip()
-        )
-        vehicle_state_code, vehicle_state_name, vehicle_state = _state_parts(vehicle)
-        eta = str(vehicle.get("estimatedTime") or "").strip()
-        gfo = " ".join(
-            str(vehicle.get(key) or "").strip()
-            for key in ("gfoCode", "gfoLevel")
-            if vehicle.get(key)
-        )
-
         owner = vehicle.get("ownerFireUnit")
         center = _unit_label(owner)
-        if center and center in unit_labels:
+        if center in unit_labels:
             center = unit_labels[center]
         elif isinstance(owner, dict):
             for key in ("id", "code", "name", "shortname", "shortName"):
@@ -506,90 +582,39 @@ def operation_event_data(
                     center = unit_labels[str(value)]
                     break
 
-        display_name = vehicle_name
-        if ack and ack not in vehicle_name:
-            display_name = f"{ack} {vehicle_name}"
-        extras = [
-            part
-            for part in (
-                type_name,
-                vehicle_state,
-                f"ETA {eta}" if eta else "",
-                gfo,
-            )
-            if part
-        ]
-        display = display_name
-        if extras:
-            display = f"{display} - " + " | ".join(extras)
-        vehicles.append(display)
-        vehicles_data.append(
+        vehicle_state_code, vehicle_state_name = _state_parts(vehicle)
+        vehicles.append(
             {
-                "id": str(vehicle.get("id") or ""),
                 "center": center,
-                "name": vehicle_name,
-                "ack": ack,
-                "type": type_name,
-                "state": vehicle_state,
+                "name": str(
+                    vehicle.get("name")
+                    or vehicle.get("ack")
+                    or vehicle.get("id")
+                    or "Engin"
+                ).strip(),
                 "state_code": vehicle_state_code,
                 "state_name": vehicle_state_name,
-                "estimated_time": eta,
-                "gfo": gfo,
             }
         )
 
-    external_services: list[str] = []
-    external_services_data: list[dict[str, str]] = []
-    for service in operation.get("externalServices") or []:
-        if not isinstance(service, dict):
-            continue
-        label = str(service.get("name") or service.get("id") or "Service")
-        service_state_code, service_state_name, service_state = _state_parts(service)
-        display = f"{label} ({service_state})" if service_state else label
-        external_services.append(display)
-        external_services_data.append(
-            {
-                "id": str(service.get("id") or ""),
-                "name": label,
-                "state": service_state,
-                "state_code": service_state_code,
-                "state_name": service_state_name,
-            }
-        )
+    vehicles.sort(key=lambda item: (item["center"], item["name"]))
 
-    # Backward-compatible prebuilt text. New automations should normally use
-    # the structured fields above instead of depending on this formatting.
-    lines = [f"\U0001f4cd {address}", f"N\u00b0 {number}" + (f" \u00b7 {created}" if created else "")]
-    if op_state:
-        lines.append(f"\u00c9tat : {op_state}")
-    if len(addresses) > 1:
-        lines.append("Autres adresses : " + " ; ".join(addresses[1:]))
-    if fire_units:
-        lines.extend(("", "Centres", *[f"\u2022 {item}" for item in fire_units]))
-    if vehicles:
-        lines.extend(("", "Engins", *[f"\u2022 {item}" for item in vehicles]))
-    if external_services:
-        lines.extend(("", "Services", *[f"\u2022 {item}" for item in external_services]))
+    created = (
+        operation.get("dateStartRdv")
+        if operation.get("typeCode") == "D1"
+        else operation.get("dateCreation")
+    )
 
     return {
         "id": operation_id,
         "number": number,
-        "disaster": disaster,
-        "address": address,
-        "addresses": addresses,
+        "title": title,
         "created": created,
-        "state": op_state,
+        "address": address,
+        "latitude": latitude,
+        "longitude": longitude,
+        "navigation_uri": operation_navigation_uri(operation, address),
         "state_code": state_code,
         "state_name": state_name,
-        "active": active,
-        "lifecycle": lifecycle,
-        "fire_units": fire_units,
-        "fire_units_data": fire_units_data,
         "vehicles": vehicles,
-        "vehicles_data": vehicles_data,
-        "external_services": external_services,
-        "external_services_data": external_services_data,
-        "title": f"\U0001f692 Nouvelle intervention - {disaster}",
-        "message": "\n".join(lines),
-        "title_html": f"\U0001f692 Nouvelle intervention - {escape(disaster)}",
     }

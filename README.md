@@ -1,284 +1,223 @@
 # ARTEMIS WebEvo for Home Assistant
 
-Unofficial Home Assistant custom integration for **ARTEMIS WebEvo**.
+Unofficial Home Assistant custom integration for **ARTEMIS WebEvo**, initially developed and tested against the SDIS 39 deployment.
 
-It connects to an authorized ARTEMIS WebEvo account and exposes useful firefighter availability and live-operation information as Home Assistant entities and events.
-
-> **Status:** early community release. Developed and tested against an SDIS 39 ARTEMIS WebEvo deployment. Other deployments may differ.
->
-> **Unofficial:** this project is not affiliated with or endorsed by Inetum, ARTEMIS, Smartemis, SDIS 39, or any fire and rescue service.
->
-> **Made with AI:** this integration was largely designed and implemented with AI assistance, using authorized browser traffic to understand the ARTEMIS WebEvo interfaces. Human review is very welcome. **Recommendations, code review, fixes, and architectural suggestions are especially welcome from experienced Python and Home Assistant developers.**
+> [!WARNING]
+> This project is not affiliated with or endorsed by Systel, ARTEMIS, SDIS 39, or any French emergency-service authority. It must **not** be used as the sole alerting, dispatch or operational-information channel.
 
 ## What it does
 
-- Shows your **current personal ARTEMIS status**.
-- Shows your **next real status change**, including the upcoming ARTEMIS code such as `IND`, `AS1`, `DI1`, etc.
-- Exposes a personal available/unavailable binary sensor.
-- Shows the **number of personnel currently available at your ARTEMIS centre**, using ARTEMIS' native centre counter.
-- Shows the number of **active interventions** and whether at least one intervention is active.
-- Fires an `artemis_new_intervention` Home Assistant event when a new operation appears.
-- Fires `artemis_intervention_update` lifecycle events for operation snapshots, updates and completion.
-- Provides structured operation payloads so Home Assistant notifications can format address, units, vehicles, states and external services freely.
-- Automatically logs in through CAS and renews expired ARTEMIS sessions.
-- Exposes a one-press **personal status cycle button**: `IND -> DI1 -> AS1 -> IND`.
-- Status writes are deliberately limited to **your own personal planning** and only until the next status change that was already planned in ARTEMIS.
-- Never modifies interventions, other firefighters, or centre planning.
+Version **0.5.0** deliberately keeps the Home Assistant surface small:
 
-## Entities
+| Entity | Purpose |
+| --- | --- |
+| `sensor.statut_artemis` | Personal status, next planned change, station availability and write capability |
+| `sensor.interventions_artemis` | Number of currently active interventions + structured active-intervention snapshot |
+| `button.cycle_artemis_status` | `IND -> DI1 -> AS1 -> IND`, only until the next already-planned change |
 
-Typical entity IDs after a fresh installation:
+There are no separate next-change, availability, active-operation-count or binary sensors in 0.5.0. The useful data is grouped into the two sensors above.
 
-| Entity | Example / purpose | Icon |
-|---|---|---|
-| `sensor.statut_artemis` | `INDISPONIBLE`, `ASTREINTE NIVEAU 1`, etc. | `mdi:account-clock` |
-| `sensor.prochain_changement_artemis` | `AS1 · 30/09 18:30` | `mdi:list-status` |
-| `binary_sensor.disponible_artemis` | Your current availability | dynamic |
-| `sensor.available_personnel_artemis` | Number of people currently available at the centre | `mdi:account-multiple-check` |
-| `sensor.active_interventions_count_artemis` | Number of currently active interventions | `mdi:fire-alert` |
-| `binary_sensor.active_interventions_artemis` | On when one or more interventions are active | `mdi:fire-alert` |
-| `button.cycle_artemis_status` | Cycle `IND -> DI1 -> AS1 -> IND` until the preserved next planned change | `mdi:account-switch` |
+## Architecture
 
-Home Assistant can adjust an entity ID if a naming collision already exists. Unique IDs remain stable.
+The integration authenticates to WebEvo through the observed CAS/WebEvo login flow and uses only endpoints already available to the configured account.
 
-### Next status change
-
-The state intentionally contains both the upcoming ARTEMIS status code and the time:
+It intentionally avoids a local intervention lifecycle/state machine:
 
 ```text
-AS1 · 30/09 18:30
+ARTEMIS synoptic
+      |
+      | poll (WebEvo refresh interval, minimum 15 s)
+      v
+sensor.interventions_artemis
+      |
+      | Home Assistant compares snapshots
+      v
+notifications / automations / dashboards
 ```
 
-Additional attributes keep the complete information:
+Network refreshes use different cadences to avoid unnecessary ARTEMIS traffic:
+
+- active interventions: WebEvo's advertised synoptic refresh interval, with a 15-second minimum;
+- personal planning: every 5 minutes, plus an exact refresh just after the next known planning boundary;
+- native centre availability counter: every 30 seconds.
+
+`DataUpdateCoordinator` equality checks prevent entity updates when a returned snapshot is unchanged.
+
+## Installation
+
+### HACS
+
+1. Open HACS -> **Integrations**.
+2. Add `https://github.com/purierca/artemis` as a custom repository of type **Integration**.
+3. Install **ARTEMIS WebEvo**.
+4. Restart Home Assistant.
+5. Go to **Settings -> Devices & services -> Add integration -> ARTEMIS WebEvo**.
+
+The defaults match the deployment used during development:
+
+```text
+Host:        https://artemisweb.sdis39.fr
+CAS service: https://artemis/artemis-web
+```
+
+Other WebEvo deployments may use different values or expose different permissions/data structures.
+
+### Manual
+
+Copy:
+
+```text
+custom_components/artemis/
+```
+
+into:
+
+```text
+/config/custom_components/artemis/
+```
+
+and restart Home Assistant.
+
+## `sensor.statut_artemis`
+
+The sensor state remains the human-readable current ARTEMIS status. Its attributes contain everything needed for dashboards and compact notifications.
+
+Example:
 
 ```yaml
-statut_actuel: INDISPONIBLE
-prochain_statut: ASTREINTE NIVEAU 1
-prochain_code: AS1
-date: 2026-09-30T18:30:00+02:00
-horizon_semaines: 1
+state: DISPONIBLE NIV 1
+attributes:
+  code: DI1
+  since: "2026-10-05T07:00:00+02:00"
+  next_status: ASTREINTE NIV 1
+  next_code: AS1
+  next_change: "2026-10-05T18:30:00+02:00"
+  available_personnel: 4
+  personnel_in_operation: 2
+  center: BEA
+  person: "..."
+  override_active: false
+  writable: true
+  can_cycle: true
+  cycle_next_code: AS1
 ```
 
-The integration ignores ARTEMIS row/day boundaries when the actual status remains unchanged, so an `IND -> IND` boundary is not reported as a status change.
+This single sensor replaces the separate next-change and available-personnel sensors used by earlier releases.
 
-## One-button personal status control
+## One-button personal status cycle
 
-The integration exposes a stateless Home Assistant button:
-
-```text
-button.cycle_artemis_status
-```
-
-Each press cycles the **currently active personal ARTEMIS status**:
+`button.cycle_artemis_status` performs a real ARTEMIS planning write:
 
 ```text
 IND -> DI1 -> AS1 -> IND
 ```
 
-The change is applied from the current minute **only until the next different status change that was already planned before the first override**. The schedule from that preserved boundary onward is left untouched.
+The change applies only from the current time until the **next status boundary that was already planned before the first override**.
 
 For example:
 
 ```text
 Before
-Saturday 14:38                                  Monday 07:00
-AS1 -------------------------------------------> DI1
+AS1 ---------------------------> IND
+now                            Monday 07:00
 
-Press once
-AS1 history | DI1 -----------------------------> DI1
-              ^ current minute                   ^ original boundary preserved
-
-Press again later
-AS1 history | DI1 history | AS1 ----------------> DI1
+Press button
+DI1 ---------------------------> IND
+now                            Monday 07:00
 ```
 
-The preserved boundary is stored by Home Assistant, so repeated presses — and Home Assistant restarts — do not accidentally extend the temporary override when the selected temporary status happens to match the status planned at the boundary.
+Monday 07:00 is preserved. Repeated button presses continue to use that same original boundary, including across a Home Assistant restart.
 
-The button is unavailable when:
+The integration refuses the write when:
 
-- ARTEMIS reports the personal planning as read-only;
-- the current status is not `IND`, `DI1`, or `AS1`;
-- the target status is not offered by that ARTEMIS deployment;
-- no future planned status change can be found.
+- the personal planning is read-only;
+- the current/target status is outside `IND`, `DI1`, `AS1`;
+- WebEvo does not advertise the target status;
+- no future planned boundary is available;
+- ARTEMIS requests an ubiquity/conflict confirmation.
 
-ARTEMIS WebEvo may also refuse a write because of its own consistency/ubiquity controls. The integration does **not** force those conflicts.
+It never automatically forces an ubiquity conflict.
 
-> **Important:** pressing this button writes to your real ARTEMIS personal planning. Home Assistant is not the authoritative operational system; verify important availability changes in the official tools used by your fire and rescue service.
+A minimal dashboard button is provided in [`dashboard_cycle_button.example.yaml`](dashboard_cycle_button.example.yaml).
 
-### Simple dashboard button
+## Persistent personal-status notification
 
-No helper, `input_select`, script, or intermediate automation is required:
-
-```yaml
-type: button
-entity: button.cycle_artemis_status
-name: Changer statut
-icon: mdi:account-switch
-show_state: false
-tap_action:
-  action: perform-action
-  perform_action: button.press
-  target:
-    entity_id: button.cycle_artemis_status
-```
-
-## Centre availability
-
-`sensor.available_personnel_artemis` uses the same native counter endpoint used by ARTEMIS WebEvo rather than trying to reconstruct availability by counting individual schedules.
-
-Its state is the current `availableCounter` returned by ARTEMIS. The attributes also expose:
-
-```yaml
-centre: BEA
-en_intervention: 0
-```
-
-Only aggregate counts are exposed. The integration does not create entities containing the names or schedules of other firefighters.
-
-The centre counter is refreshed every 30 seconds.
-
-## Active interventions
-
-The integration polls the live ARTEMIS operations synoptic using the refresh interval announced by ARTEMIS, with a minimum of 15 seconds.
-
-Two entities represent the current aggregate state:
+The included example creates a compact Android notification such as:
 
 ```text
-sensor.active_interventions_count_artemis
-binary_sensor.active_interventions_artemis
+🚒 4 dispo · DI1 > 18:30 > AS1
 ```
 
-### Structured intervention lifecycle event
-
-For notification and automation design, listen to:
+or, when the next change is not today:
 
 ```text
-artemis_intervention_update
+🚒 4 dispo · AS1 > 07/10 07:00 > IND
 ```
 
-This event is emitted when an active operation is first observed, when data exposed by ARTEMIS changes, and when the operation disappears from the active synoptic. It also emits a `snapshot` for operations already active when Home Assistant starts.
+Behaviour:
 
-`lifecycle` can be:
+- the notification stays persistent;
+- tapping the notification opens Smartemis;
+- its action button dynamically shows the next cycle status, e.g. `-> AS1`;
+- tapping that action presses `button.cycle_artemis_status`;
+- the same automation handles both notification refreshes and action taps.
 
-- `snapshot`: already active when the integration starts;
-- `new`: a newly observed operation;
-- `updated`: ARTEMIS changed the operation, vehicle or unit data;
-- `ended`: the operation disappeared from the active synoptic.
+See [`automation_status_notification.example.yaml`](automation_status_notification.example.yaml).
 
-The event also exposes `active: true/false`. An `ended` lifecycle is inferred from disappearance from the live active-operation list; it is not an official replacement for the operational status recorded in ARTEMIS. The final event keeps the last known operation payload so a mobile notification can show the last known resources and states.
+Replace `notify.mobile_app_YOUR_PHONE` with your own Companion App notification service.
 
-Typical structured event data:
+## `sensor.interventions_artemis`
+
+The sensor state is simply the number of interventions currently returned by the ARTEMIS active synoptic.
+
+The `interventions` attribute is a structured snapshot intended for your own Home Assistant automations. The integration does **not** pre-format the mobile notification.
+
+Example:
 
 ```yaml
-id: "26000042"
-number: "26000042"
-disaster: "SECOURS A PERSONNE"
-address: "BEAUFORT - 12 RUE EXEMPLE - 39190"
-created: "2026-09-30T11:43:00"
-state: "EC - EN COURS"
-state_code: "EC"
-state_name: "EN COURS"
-active: true
-lifecycle: updated
-fire_units_data:
-  - id: "BEA"
-    label: "BEAUF"
-    state_code: "PA"
-    state_name: "PARTI"
-vehicles_data:
-  - id: "123"
-    center: "BEAUF"
-    name: "VLTU 01"
-    type: "VLTU"
-    state_code: "PA"
-    state_name: "PARTI"
-    estimated_time: "11:48"
-external_services_data: []
+state: 1
+attributes:
+  interventions:
+    - id: "26000042"
+      number: "26000042"
+      title: "SECOURS A PERSONNE"
+      created: "2026-10-05T15:41:00"
+      address: "BEAUFORT - 12 RUE EXEMPLE - 39190"
+      latitude: 46.575123
+      longitude: 5.438456
+      navigation_uri: "geo:46.575123,5.438456?q=46.575123,5.438456"
+      state_code: EC
+      state_name: EN COURS
+      vehicles:
+        - center: BEAUF
+          name: VLTU 01
+          state_code: PA
+          state_name: PARTI
+        - center: BEAUF
+          name: VSAV 01
+          state_code: SL
+          state_name: SUR LES LIEUX
 ```
 
-The exact fields depend on what the ARTEMIS server exposes for the operation. The older string fields (`fire_units`, `vehicles`, `external_services`) and the prebuilt `title` / `message` fields are kept for backward compatibility. You do not need to use the prebuilt message: the structured fields are intended for fully custom Home Assistant notifications.
+If ARTEMIS does not expose a plausible WGS84 GPS pair, `navigation_uri` falls back to an Android `geo:` search for the formatted address. Ambiguous projected `x`/`y` coordinates are deliberately ignored.
 
-The existing event remains available:
+### Why there is no `new/updated/ended` field
 
-```text
-artemis_new_intervention
-```
+Every item in `sensor.interventions_artemis` is active **right now**. That is the entire contract.
 
-It fires only for genuinely new operation IDs and is retained for existing automations.
+Home Assistant can infer lifecycle from two consecutive snapshots:
 
-### Persistent, live-updating Android intervention notification
+- present now, absent before -> new;
+- present in both, data changed -> updated;
+- absent now, present before -> ended.
 
-This example creates one notification per operation. While the operation is active, the notification is persistent and is updated in place whenever ARTEMIS changes its state or resources. When the operation ends, the same notification is updated to show `Terminée`, becomes dismissible, and is left on the phone until the user removes it.
+This keeps ARTEMIS polling/state handling in the integration and notification policy in Home Assistant.
 
-Replace `notify.mobile_app_TON_TELEPHONE` with your Home Assistant Companion notification service.
+## Persistent intervention tracking notification
 
-```yaml
-alias: "ARTEMIS - Suivi intervention"
-description: "Notification persistante mise à jour pendant toute l'intervention"
-mode: queued
-max: 20
+[`automation_interventions.example.yaml`](automation_interventions.example.yaml) is one automation for the complete intervention lifecycle.
 
-triggers:
-  - trigger: event
-    event_type: artemis_intervention_update
-
-conditions: []
-
-actions:
-  - variables:
-      notification_title: >-
-        🚒 {{ trigger.event.data.disaster }}
-      notification_message: |-
-        {{ trigger.event.data.address }}
-        État : {{
-          (trigger.event.data.state_name or trigger.event.data.state_code or trigger.event.data.state or 'En cours')
-          if trigger.event.data.active
-          else 'Terminée'
-        }}
-        {% for vehicle in trigger.event.data.vehicles_data %}
-        {{ vehicle.center or 'Centre' }} : {{ vehicle.name }} [{{ vehicle.state_name or vehicle.state_code or vehicle.state or '?' }}]
-        {% endfor %}
-      notification_tag: >-
-        artemis_intervention_{{ trigger.event.data.id }}
-
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.event.data.active }}"
-        sequence:
-          - action: notify.mobile_app_TON_TELEPHONE
-            data:
-              title: "{{ notification_title }}"
-              message: "{{ notification_message }}"
-              data:
-                tag: "{{ notification_tag }}"
-                group: artemis_interventions
-                persistent: true
-                sticky: true
-                alert_once: true
-                importance: high
-                priority: high
-                ttl: 0
-                notification_icon: mdi:fire-alert
-                channel: Interventions SPV
-                clickAction: "app://com.sis.smartemis"
-    default:
-      - action: notify.mobile_app_TON_TELEPHONE
-        data:
-          title: "{{ notification_title }}"
-          message: "{{ notification_message }}"
-          data:
-            tag: "{{ notification_tag }}"
-            group: artemis_interventions
-            persistent: false
-            sticky: false
-            alert_once: true
-            notification_icon: mdi:fire-alert
-            channel: Interventions SPV
-            clickAction: "app://com.sis.smartemis"
-```
-
-Example while active:
+For an active intervention it creates/updates a persistent notification with a stable tag:
 
 ```text
 🚒 SECOURS A PERSONNE
@@ -286,9 +225,13 @@ BEAUFORT - 12 RUE EXEMPLE - 39190
 État : EN COURS
 BEAUF : VLTU 01 [PARTI]
 BEAUF : VSAV 01 [SUR LES LIEUX]
+
+[Naviguer]
 ```
 
-Example after the operation disappears from the active synoptic:
+As ARTEMIS updates the operation or vehicle states, the same notification is replaced in place.
+
+When the intervention disappears from the active ARTEMIS snapshot, the automation reuses the **last known snapshot** and updates the same notification to:
 
 ```text
 🚒 SECOURS A PERSONNE
@@ -296,283 +239,69 @@ BEAUFORT - 12 RUE EXEMPLE - 39190
 État : Terminée
 BEAUF : VLTU 01 [RETOUR]
 BEAUF : VSAV 01 [RETOUR]
+
+[Naviguer]
 ```
 
-The same YAML is included in [`automation_intervention_status.example.yaml`](automation_intervention_status.example.yaml).
+The integration does not invent a server-side `Terminée` state: the automation uses that label because the intervention is no longer present in the active synoptic. Vehicle lines use the **last states actually seen in ARTEMIS**; the automation does not invent a `RETOUR` state if WebEvo never exposed one before removing the operation.
 
-## Persistent Android status notification with a cycle action
+The final notification is **not cleared**. It becomes dismissible and remains on the phone until the user removes it.
 
-A compact persistent Android notification can act as an always-visible ARTEMIS summary. Example:
+The example also provides:
 
-```text
-🚒 4 dispo · AS1 > 05/10 07:00 > DI1
-```
+- main notification tap -> Smartemis;
+- `Naviguer` -> ARTEMIS GPS point when available, otherwise address search;
+- one notification per intervention using `artemis_intervention_<id>` as the notification tag;
+- `alert_once` so state/resource updates do not repeatedly alert the phone.
 
-If the next planned change is today, the date is omitted:
+## Privacy and Recorder
 
-```text
-🚒 4 dispo · AS1 > 18:30 > DI1
-```
+Operational addresses, vehicle states and potentially GPS coordinates are stored in the Home Assistant state attributes while an intervention is active.
 
-Tapping the **notification itself** opens Smartemis. Expanding it shows one action button whose label follows the current cycle, for example `→ DI1`, `→ AS1`, or `→ IND`. Pressing that action triggers `button.cycle_artemis_status`.
-
-Replace `notify.mobile_app_TON_TELEPHONE` with your Android Companion App notify action.
-
-### 1. Persistent notification
+If you do not want those snapshots written to Recorder/history, exclude the sensor:
 
 ```yaml
-alias: ARTEMIS - Statut permanent
-
-triggers:
-  - trigger: state
-    entity_id:
-      - sensor.available_personnel_artemis
-      - sensor.statut_artemis
-      - sensor.prochain_changement_artemis
-
-  - trigger: homeassistant
-    event: start
-
-conditions:
-  - condition: template
-    value_template: >-
-      {{ states('sensor.available_personnel_artemis') not in ['unknown', 'unavailable']
-         and states('sensor.statut_artemis') not in ['unknown', 'unavailable']
-         and states('sensor.prochain_changement_artemis') not in ['unknown', 'unavailable'] }}
-
-actions:
-  - action: notify.mobile_app_TON_TELEPHONE
-    data:
-      title: >-
-        {% set next_dt = as_local(as_datetime(
-          state_attr('sensor.prochain_changement_artemis', 'date')
-        )) %}
-        {% set current_code = state_attr('sensor.statut_artemis', 'code') %}
-        {% set next_code = state_attr('sensor.prochain_changement_artemis', 'prochain_code') %}
-        🚒 {{ states('sensor.available_personnel_artemis') }} dispo ·
-        {{ current_code }} >
-        {% if next_dt.date() == now().date() %}
-          {{ next_dt.strftime('%H:%M') }}
-        {% else %}
-          {{ next_dt.strftime('%d/%m %H:%M') }}
-        {% endif %}
-        > {{ next_code }}
-
-      # Android requires a message. A zero-width space keeps the notification compact.
-      message: "\u200B"
-
-      data:
-        tag: artemis_status
-        persistent: true
-        sticky: true
-        alert_once: true
-        notification_icon: mdi:fire-alert
-        channel: ARTEMIS Status
-
-        # Tap the notification body -> Smartemis.
-        clickAction: "app://com.sis.smartemis"
-
-        # Expanded notification -> cycle the current ARTEMIS status.
-        actions:
-          - action: ARTEMIS_CYCLE_STATUS
-            title: >-
-              {% set current = state_attr('sensor.statut_artemis', 'code') %}
-              {% set cycle = {'IND': 'DI1', 'DI1': 'AS1', 'AS1': 'IND'} %}
-              → {{ cycle.get(current, '—') }}
-
-mode: restart
+recorder:
+  exclude:
+    entities:
+      - sensor.interventions_artemis
 ```
 
-Because the same `tag` is reused, Android updates the existing notification instead of creating a new one. `alert_once: true` keeps normal status refreshes silent.
+Also remember that automation traces and mobile notification history may contain operational information.
 
-### 2. Handle the notification action
+Never publish unredacted HAR files, automation traces or logs containing operational or authentication data.
 
-The Companion App sends a `mobile_app_notification_action` event when the action button is pressed. This automation forwards it to the integration button:
+## Authentication and security
 
-```yaml
-alias: ARTEMIS - Changer statut depuis notification
+Credentials are stored in the local Home Assistant config entry and used to authenticate to the configured WebEvo deployment.
 
-triggers:
-  - trigger: event
-    event_type: mobile_app_notification_action
-    event_data:
-      action: ARTEMIS_CYCLE_STATUS
+The integration automatically renews the WebEvo session when it detects an authentication redirect/expiry.
 
-conditions:
-  - condition: template
-    value_template: >-
-      {{ trigger.event.data.get('tag') == 'artemis_status' }}
+Never publish:
 
-actions:
-  - action: button.press
-    target:
-      entity_id: button.cycle_artemis_status
-
-mode: queued
-max: 5
-```
-
-After ARTEMIS confirms the write, the integration refreshes the personal planning and centre counter. The persistent notification then updates automatically from the sensor state change.
-
-The complete example is also available in [`automation_persistent_status.example.yaml`](automation_persistent_status.example.yaml).
-
-## Installation with HACS
-
-This repository is a HACS **Integration** repository.
-
-### Add as a custom repository
-
-1. Open **HACS** in Home Assistant.
-2. Open the HACS menu and choose **Custom repositories**.
-3. Add:
-
-   ```text
-   https://github.com/purierca/artemis
-   ```
-
-4. Select category **Integration**.
-5. Open **ARTEMIS WebEvo** in HACS and install it.
-6. Restart Home Assistant.
-7. Go to **Settings > Devices & services > Add integration**.
-8. Search for **ARTEMIS WebEvo**.
-
-The repository does not need to be accepted into the default HACS store to be installed as a custom repository.
-
-## Manual installation
-
-Copy:
-
-```text
-custom_components/artemis
-```
-
-to:
-
-```text
-/config/custom_components/artemis
-```
-
-and restart Home Assistant.
-
-## Configuration
-
-Configuration is entirely through the Home Assistant UI.
-
-For the SDIS 39 deployment used during development, the defaults are:
-
-```text
-ARTEMIS server: https://artemisweb.sdis39.fr
-CAS service URL: https://artemis/artemis-web
-```
-
-Then enter your ARTEMIS username and password.
-
-The CAS service URL is configurable because other ARTEMIS WebEvo deployments may use another service identifier.
-
-### Authentication flow
-
-The integration reproduces the normal browser flow:
-
-```text
-CAS login
-  -> CAS service ticket
-  -> ARTEMIS WebEvo SSO hand-off
-  -> centre/profile selection
-  -> authenticated ARTEMIS API session
-```
-
-If the session expires, the integration attempts to authenticate again automatically. If the account credentials are no longer accepted, Home Assistant starts a reauthentication flow.
-
-## How personal planning is interpreted
-
-ARTEMIS can use an operational day that starts at a configured time such as `07:00` rather than midnight.
-
-The integration reads the centre's `planningStartTime` and converts ARTEMIS periods into timezone-aware Home Assistant timestamps.
-
-Consecutive periods with the same status are treated as one continuous block. Planning is refreshed every five minutes, and another refresh is scheduled immediately after the next known true status boundary.
-
-When necessary, the integration looks ahead up to eight weeks to find the next genuinely different status.
-
-## Privacy and security
-
-ARTEMIS can contain sensitive personal and operational information.
-
-This integration deliberately keeps persistent entities minimal:
-
-- other firefighters are represented only through the aggregate available-personnel counter;
-- operation addresses and details are emitted in the `artemis_new_intervention` and `artemis_intervention_update` events for notification/automation use;
-- the integration does not create a permanent address/history sensor;
-- optional status writes are restricted to the authenticated user's personal planning and the `IND` / `DI1` / `AS1` cycle.
-
-Home Assistant stores config-entry credentials locally. Protect:
-
-- `/config/.storage`;
-- Home Assistant backups;
-- administrator access to Home Assistant.
-
-Never publish an unredacted ARTEMIS HAR. HAR files can contain passwords, CAS tickets, SSO values, cookies, identities, planning information and active-operation details.
+- ARTEMIS username/password;
+- CAS tickets;
+- `JSESSIONID`, `MOD_AUTH_CAS_S`, `CASTGC` or similar cookies;
+- `ssoSha1` values;
+- identifiable firefighter information;
+- active-operation addresses/GPS/resource data.
 
 See [`SECURITY.md`](SECURITY.md).
 
 ## Compatibility
 
-### Tested / observed API surfaces
+This integration is based on WebEvo behaviour observed on one deployment. Different SDIS deployments can differ in:
 
-The initial implementation was built from an SDIS 39 ARTEMIS WebEvo deployment and uses:
+- authentication configuration;
+- permissions;
+- status codes;
+- planning rules;
+- intervention/address/GPS fields;
+- availability-counter access.
 
-```text
-api/personPlanning/initData
-api/personPlanning/getPlanning
-api/planningStaff/saveStaff
-api/planningCounters/getCounters
-api/synopticOperations/initData
-api/synopticOperations
-```
+Compatibility reports are welcome, but please redact all sensitive data before sharing them.
 
-Other ARTEMIS deployments may use different hosts, CAS service identifiers, profiles, permissions, or backend versions. Compatibility outside the tested deployment is therefore not guaranteed yet.
-
-If you test another deployment, please open an issue — but never include credentials, raw cookies, CAS tickets, firefighter names, or operational addresses.
-
-## Troubleshooting
-
-### Integration does not appear after HACS installation
-
-Restart Home Assistant after installing the integration, then search again under **Settings > Devices & services > Add integration**.
-
-### `invalid_auth`
-
-Verify that the account can sign into ARTEMIS WebEvo normally. If another deployment uses a different CAS service identifier, use that identifier during integration setup.
-
-### `cannot_connect`
-
-Confirm that the Home Assistant host can reach the ARTEMIS WebEvo HTTPS endpoint and that DNS/TLS work from the Home Assistant environment.
-
-### Intervention already active after a Home Assistant restart
-
-Existing operations still do **not** trigger a false `artemis_new_intervention`. They do emit an `artemis_intervention_update` event with `lifecycle: snapshot`, allowing a persistent status notification to be recreated or refreshed after restart.
-
-### Centre availability is unavailable
-
-The integration needs ARTEMIS to expose a planning ID for the current operational day and permit access to `planningCounters/getCounters`. Deployments or profiles without this permission may not expose the sensor successfully.
-
-## Development and contributions
-
-This is an early community project and was **made with substantial AI assistance**. That makes review particularly valuable.
-
-Recommendations are welcome from everyone, and especially from experienced developers who can help review:
-
-- Home Assistant integration architecture;
-- async Python and coordinator patterns;
-- authentication/session handling;
-- compatibility with other ARTEMIS deployments;
-- tests and error handling;
-- privacy and operational-data handling.
-
-Issues and pull requests are welcome at:
-
-```text
-https://github.com/purierca/artemis
-```
+## Development
 
 Local checks:
 
@@ -582,19 +311,14 @@ python3 -m unittest discover -s tests -v
 python3 scripts/check_ready.py
 ```
 
-GitHub Actions validate the repository with:
+GitHub Actions additionally run HACS validation and Hassfest.
 
-- HACS validation;
-- Home Assistant Hassfest;
-- Python compile/smoke tests;
-- repository metadata checks.
+## AI-assisted development
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+This integration was largely designed and implemented with AI assistance, with the repository owner defining the intended behaviour and testing it against their authorised ARTEMIS account.
 
-## Disclaimer
+Human review is very welcome. Recommendations, code review, fixes and architectural suggestions are especially welcome from experienced Python and Home Assistant developers.
 
-Use this integration only with an ARTEMIS account and data you are authorized to access. It is a convenience integration for Home Assistant and must not be treated as a replacement for official alerting, dispatch, availability, or operational systems.
-
-## License
+## Licence
 
 MIT. See [`LICENSE`](LICENSE).

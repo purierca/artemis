@@ -1,0 +1,10 @@
+type: button
+entity: button.cycle_artemis_status
+name: Changer statut
+icon: mdi:account-switch
+show_state: false
+tap_action:
+  action: perform-action
+  perform_action: button.press
+  target:
+    entity_id: button.cycle_artemis_status

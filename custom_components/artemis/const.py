@@ -13,15 +13,18 @@ CONF_CAS_SERVICE = "cas_service"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 
-EVENT_NEW_INTERVENTION = "artemis_new_intervention"
-EVENT_INTERVENTION_UPDATE = "artemis_intervention_update"
-
+# Personal planning is comparatively static, so poll it slowly and schedule an
+# exact refresh on the next known boundary.
 PLANNING_UPDATE_INTERVAL = timedelta(minutes=5)
-OPERATIONS_UPDATE_INTERVAL = timedelta(seconds=15)
-CENTER_COUNTER_UPDATE_INTERVAL = timedelta(seconds=30)
-MAX_LOOKAHEAD_WEEKS = 8
 
-UNAVAILABLE_STATUS_CODES = {"IND", "IN"}
+# WebEvo exposes its own operations refresh interval. This is only the fallback.
+OPERATIONS_UPDATE_INTERVAL = timedelta(seconds=15)
+
+# The native centre counter is useful in the compact status sensor, but does not
+# need to be fetched as often as the live operations synoptic.
+CENTER_COUNTER_UPDATE_INTERVAL = timedelta(seconds=30)
+
+MAX_LOOKAHEAD_WEEKS = 8
 
 # One-button personal availability cycle. Only these states are ever written.
 STATUS_CYCLE = ("IND", "DI1", "AS1")

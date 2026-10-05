@@ -1,16 +1,16 @@
-# Publish `purierca/artemis` on GitHub without Git
+# Publish / update `purierca/artemis` on GitHub without Git
 
-The repository is already configured for:
+The repository metadata is configured for:
 
 ```text
 https://github.com/purierca/artemis
 ```
 
-No Git installation is required for the first publication.
+## Upload the prepared 0.5.0 tree
 
-## 1. Extract the prepared archive on your desktop computer
+Extract the GitHub-ready ZIP locally. Upload the **contents** of the extracted folder to the repository root; do not upload the ZIP itself and do not create an extra parent folder.
 
-Open the extracted `artemis-repo-ready` folder. The files that need to end up at the root of the GitHub repository include:
+The root must contain, among other files:
 
 ```text
 .github/
@@ -18,87 +18,50 @@ custom_components/
 tests/
 scripts/
 README.md
+CHANGELOG.md
 LICENSE
 hacs.json
 pyproject.toml
-...
+automation_status_notification.example.yaml
+automation_interventions.example.yaml
+dashboard_cycle_button.example.yaml
 ```
 
-Do not upload the ZIP itself as the repository contents. GitHub/HACS need the actual files and directories.
+Version 0.5.0 intentionally removes `custom_components/artemis/binary_sensor.py` and the obsolete pre-0.5 notification-example files. Delete those old files from GitHub if they are still present after uploading the new tree.
 
-## 2. Upload through GitHub.com
+Suggested commit message:
 
-Open:
+```text
+Release ARTEMIS WebEvo 0.5.0
+```
+
+## Validate
+
+Open the **Actions** tab. The `Validate` workflow runs:
+
+- HACS validation;
+- Home Assistant Hassfest;
+- Python compilation and unit tests;
+- repository metadata checks.
+
+All jobs should be green before publishing the release.
+
+## Create release `0.5.0`
+
+1. Open **Releases** -> **Draft a new release**.
+2. Create tag `0.5.0`.
+3. Use release title `ARTEMIS WebEvo 0.5.0`.
+4. Summarise the breaking entity cleanup from `CHANGELOG.md`.
+5. Publish the release.
+
+The tag must match `custom_components/artemis/manifest.json`.
+
+## Install / update with HACS
+
+Add the repository as a HACS custom repository of type **Integration** if it is not already installed:
 
 ```text
 https://github.com/purierca/artemis
 ```
 
-Then:
-
-1. Click **Add file > Upload files**.
-2. Open the extracted folder on your computer.
-3. Select **all files and folders inside it** and drag them into GitHub's upload area.
-   - Make sure `.github` is included.
-   - The repository root should contain `README.md`, `hacs.json`, `custom_components`, etc.; there must not be an extra `artemis-repo-ready/` parent directory inside the repository.
-4. Use commit message:
-
-   ```text
-   Initial ARTEMIS WebEvo Home Assistant integration
-   ```
-
-5. Commit the files to `main`.
-
-The repository contains fewer than GitHub's browser-upload limit of 100 files, and no individual file approaches the browser file-size limit.
-
-## 3. Check GitHub Actions
-
-Open the **Actions** tab. The `Validate` workflow should run automatically and includes:
-
-- HACS validation;
-- Home Assistant Hassfest;
-- Python compile/smoke tests;
-- repository metadata checks.
-
-All jobs should be green before making the first release.
-
-## 4. Create release `0.1.0`
-
-On GitHub:
-
-1. Open **Releases**.
-2. Click **Draft a new release**.
-3. Create tag:
-
-   ```text
-   0.1.0
-   ```
-
-4. Release title:
-
-   ```text
-   ARTEMIS WebEvo 0.1.0
-   ```
-
-5. Publish the release.
-
-The tag matches `custom_components/artemis/manifest.json`.
-
-## 5. Install it through HACS
-
-In Home Assistant:
-
-1. Open **HACS**.
-2. Open **Custom repositories**.
-3. Add:
-
-   ```text
-   https://github.com/purierca/artemis
-   ```
-
-4. Category: **Integration**.
-5. Install **ARTEMIS WebEvo**.
-6. Restart Home Assistant.
-7. Go to **Settings > Devices & services > Add integration > ARTEMIS WebEvo**.
-
-You do not need Git on the Beelink for HACS installation or updates.
+Then install/update **ARTEMIS WebEvo** and restart Home Assistant.
