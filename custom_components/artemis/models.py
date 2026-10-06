@@ -30,6 +30,7 @@ class PlanningSnapshot:
 
     current: StatusValue | None
     current_since: datetime | None
+    current_period_end: datetime | None
     next_status: StatusValue | None
     next_change: datetime | None
     staff_name: str

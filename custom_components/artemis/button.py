@@ -51,7 +51,6 @@ class ArtemisCycleStatusButton(
         return (
             next_code is not None
             and self.coordinator.is_status_code_available(next_code)
-            and self.coordinator.effective_next_change is not None
         )
 
     @property
@@ -61,11 +60,11 @@ class ArtemisCycleStatusButton(
         return {
             "current_code": current_code,
             "next_code": cycle_status_code(current_code) if current_code else None,
-            "override_until": self.coordinator.effective_next_change,
+            "override_until": self.coordinator.effective_override_boundary,
         }
 
     async def async_press(self) -> None:
-        """Cycle current availability until the preserved next planned change."""
+        """Cycle current availability using the safest known planning boundary."""
         await self.coordinator.async_cycle_status()
         # Reflect the new native ARTEMIS centre counter immediately as well.
         await self.runtime.center.async_request_refresh()

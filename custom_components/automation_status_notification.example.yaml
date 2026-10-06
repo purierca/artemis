@@ -1,0 +1,78 @@
+alias: "ARTEMIS - Statut permanent"
+description: "Notification compacte avec statut personnel et action de cycle"
+mode: queued
+max: 10
+
+triggers:
+  - trigger: state
+    entity_id: sensor.statut_artemis
+    id: refresh
+
+  - trigger: homeassistant
+    event: start
+    id: refresh
+
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: ARTEMIS_CYCLE_STATUS
+    id: cycle
+
+conditions: []
+
+actions:
+  - choose:
+      # A tap on the notification action presses the integration button.
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'cycle'
+                 and trigger.event.data.get('tag') == 'artemis_status'
+                 and is_state_attr('sensor.statut_artemis', 'can_cycle', true) }}
+        sequence:
+          - action: button.press
+            target:
+              entity_id: button.cycle_artemis_status
+
+    # All other triggers rebuild the persistent status notification.
+    default:
+      - condition: template
+        value_template: >-
+          {{ states('sensor.statut_artemis') not in ['unknown', 'unavailable']
+             and state_attr('sensor.statut_artemis', 'code') }}
+
+      - action: notify.mobile_app_YOUR_PHONE
+        data:
+          title: >-
+            {% set current_code = state_attr('sensor.statut_artemis', 'code') -%}
+            {% set available = state_attr('sensor.statut_artemis', 'available_personnel') -%}
+            {% set next_raw = state_attr('sensor.statut_artemis', 'next_change') -%}
+            {% set next_code = state_attr('sensor.statut_artemis', 'next_code') -%}
+            {% set base = '🚒 ' ~ (available if available is not none else '?') ~ ' dispo · ' ~ current_code -%}
+            {% if next_raw and next_code -%}
+              {% set next_dt = as_local(as_datetime(next_raw)) -%}
+              {% set next_when = next_dt.strftime('%H:%M') if next_dt.date() == now().date() else next_dt.strftime('%d/%m %H:%M') -%}
+              {{ base ~ ' > ' ~ next_when ~ ' > ' ~ next_code }}
+            {%- else -%}
+              {{ base }}
+            {%- endif %}
+
+          # Android requires a message. A zero-width space keeps it visually compact.
+          message: "\u200B"
+
+          data:
+            tag: artemis_status
+            persistent: true
+            sticky: true
+            alert_once: true
+            notification_icon: mdi:fire-alert
+            channel: ARTEMIS Status
+
+            # Main notification tap -> Smartemis.
+            clickAction: "app://com.sis.smartemis"
+
+            # Action button -> next state in IND -> DI1 -> AS1 -> IND.
+            actions:
+              - action: ARTEMIS_CYCLE_STATUS
+                title: >-
+                  → {{ state_attr('sensor.statut_artemis', 'cycle_next_code') or '?' }}

@@ -142,6 +142,31 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         return self.data.next_status if self.data is not None else None
 
     @property
+    def effective_override_boundary(self) -> datetime | None:
+        """Return a safe boundary for a temporary status override.
+
+        Prefer the next real status change. If no different future status is
+        known, fall back to the end of the contiguous same-status planning
+        horizon currently returned by ARTEMIS. This keeps the cycle button
+        usable for an otherwise indefinite status while still never writing
+        beyond planning data that WebEvo actually returned.
+        """
+        if self._override_is_active():
+            return self._override_boundary
+        if self.data is None:
+            return None
+        return self.data.next_change or self.data.current_period_end
+
+    @property
+    def effective_override_next_status(self) -> StatusValue | None:
+        """Return the planned status to preserve at the override boundary."""
+        if self._override_is_active():
+            return self._override_next_status
+        if self.data is None:
+            return None
+        return self.data.next_status or self.data.current
+
+    @property
     def status_override_active(self) -> bool:
         return self._override_is_active()
 
@@ -168,7 +193,7 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         await self._override_store.async_save({})
 
     async def async_cycle_status(self) -> str:
-        """Cycle IND -> DI1 -> AS1 -> IND until the next planned change."""
+        """Cycle IND -> DI1 -> AS1 -> IND using the safest known boundary."""
         if self.read_only:
             raise HomeAssistantError("ARTEMIS reports this personal planning as read-only")
 
@@ -199,12 +224,12 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                 boundary = self._override_boundary
                 planned_next = self._override_next_status
             else:
-                boundary = self.data.next_change
-                planned_next = self.data.next_status
+                boundary = self.effective_override_boundary
+                planned_next = self.effective_override_next_status
 
             if boundary is None or planned_next is None:
                 raise HomeAssistantError(
-                    "No future planned ARTEMIS status change was found; nothing was changed"
+                    "ARTEMIS did not expose a writable future planning boundary"
                 )
             if start >= boundary:
                 raise HomeAssistantError(

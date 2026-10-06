@@ -61,6 +61,7 @@ class ArtemisStatusSensor(CoordinatorEntity[ArtemisPlanningCoordinator], SensorE
         current = data.current if data else None
         next_status = self.coordinator.effective_next_status
         next_change = self.coordinator.effective_next_change
+        cycle_until = self.coordinator.effective_override_boundary
         center = self.runtime.center.data if self.runtime.center.last_update_success else None
 
         current_code = current.code if current else None
@@ -69,7 +70,6 @@ class ArtemisStatusSensor(CoordinatorEntity[ArtemisPlanningCoordinator], SensorE
             cycle_next
             and not self.coordinator.read_only
             and self.coordinator.is_status_code_available(cycle_next)
-            and next_change is not None
         )
 
         return {
@@ -86,6 +86,7 @@ class ArtemisStatusSensor(CoordinatorEntity[ArtemisPlanningCoordinator], SensorE
             "writable": not self.coordinator.read_only,
             "can_cycle": can_cycle,
             "cycle_next_code": cycle_next if can_cycle else None,
+            "cycle_until": cycle_until,
         }
 
 

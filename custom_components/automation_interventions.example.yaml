@@ -1,0 +1,109 @@
+alias: "ARTEMIS - Suivi interventions"
+description: "Une notification persistante par intervention active, mise à jour par le snapshot ARTEMIS"
+mode: queued
+max: 20
+
+triggers:
+  - trigger: state
+    entity_id: sensor.interventions_artemis
+
+conditions: []
+
+actions:
+  # ---------------------------------------------------------------------------
+  # Active interventions: create or update one notification per operation.
+  # The stable tag makes Android replace the previous notification in place.
+  # ---------------------------------------------------------------------------
+  - repeat:
+      for_each: >-
+        {{ trigger.to_state.attributes.get('interventions', []) }}
+      sequence:
+        - variables:
+            intervention: "{{ repeat.item }}"
+
+        - action: notify.mobile_app_YOUR_PHONE
+          data:
+            title: >-
+              🚒 {{ intervention.title }}
+
+            message: |-
+              {{ intervention.address }}
+              État : {{ intervention.state_name or intervention.state_code or 'En cours' }}
+              {% for vehicle in intervention.vehicles %}
+              {{ vehicle.center or 'Centre' }} : {{ vehicle.name }} [{{ vehicle.state_name or vehicle.state_code or '?' }}]
+              {% endfor %}
+
+            data:
+              tag: >-
+                artemis_intervention_{{ intervention.id }}
+              group: artemis_interventions
+
+              persistent: true
+              sticky: true
+              alert_once: true
+              importance: high
+              priority: high
+              ttl: 0
+
+              notification_icon: mdi:fire-alert
+              channel: Interventions SPV
+
+              # Main notification tap -> Smartemis.
+              clickAction: "app://com.sis.smartemis"
+
+              # Direct navigation to the ARTEMIS GPS point, with address fallback.
+              actions:
+                - action: URI
+                  title: Naviguer
+                  uri: >-
+                    {{ intervention.navigation_uri or 'app://com.sis.smartemis' }}
+
+  # ---------------------------------------------------------------------------
+  # Ended interventions: anything present in the previous snapshot but absent
+  # from the current one is considered ended. Keep the last known resource
+  # states, mark the notification "Terminée", and make it user-dismissible.
+  # ---------------------------------------------------------------------------
+  - repeat:
+      for_each: >-
+        {{ trigger.from_state.attributes.get('interventions', []) if trigger.from_state else [] }}
+      sequence:
+        - variables:
+            intervention: "{{ repeat.item }}"
+
+        - condition: template
+          value_template: >-
+            {% set current_ids = trigger.to_state.attributes.get('interventions', [])
+               | map(attribute='id') | map('string') | list %}
+            {{ intervention.id | string not in current_ids }}
+
+        - action: notify.mobile_app_YOUR_PHONE
+          data:
+            title: >-
+              🚒 {{ intervention.title }}
+
+            message: |-
+              {{ intervention.address }}
+              État : Terminée
+              {% for vehicle in intervention.vehicles %}
+              {{ vehicle.center or 'Centre' }} : {{ vehicle.name }} [{{ vehicle.state_name or vehicle.state_code or '?' }}]
+              {% endfor %}
+
+            data:
+              tag: >-
+                artemis_intervention_{{ intervention.id }}
+              group: artemis_interventions
+
+              # Do not clear the notification: it remains until the user swipes it.
+              persistent: false
+              sticky: false
+              alert_once: true
+
+              notification_icon: mdi:fire-alert
+              channel: Interventions SPV
+              clickAction: "app://com.sis.smartemis"
+
+              actions:
+                - action: URI
+                  title: Naviguer
+                  uri: >-
+                    {{ intervention.navigation_uri or 'app://com.sis.smartemis' }}

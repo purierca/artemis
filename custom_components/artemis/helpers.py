@@ -110,6 +110,7 @@ def build_planning_snapshot(
         return PlanningSnapshot(
             current=None,
             current_since=None,
+            current_period_end=None,
             next_status=None,
             next_change=None,
             staff_name=staff_name,
@@ -146,9 +147,23 @@ def build_planning_snapshot(
         next_change = interval.start
         break
 
+    # ARTEMIS/WebEvo commonly splits a continuous status at row/day boundaries.
+    # Extend the current-period end through adjacent same-status intervals so a
+    # manual override can remain useful even when there is no future *different*
+    # status in the look-ahead window.
+    current_period_end = current_interval.end
+    for interval in intervals[current_index + 1 :]:
+        if interval.status.code != current.code:
+            break
+        if interval.start > current_period_end + timedelta(seconds=1):
+            break
+        if interval.end > current_period_end:
+            current_period_end = interval.end
+
     return PlanningSnapshot(
         current=current,
         current_since=current_since,
+        current_period_end=current_period_end,
         next_status=next_status,
         next_change=next_change,
         staff_name=staff_name,

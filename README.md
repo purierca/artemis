@@ -7,13 +7,13 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo**, initially d
 
 ## What it does
 
-Version **0.5.2** deliberately keeps the Home Assistant surface small:
+Version **0.5.3** deliberately keeps the Home Assistant surface small:
 
 | Entity | Purpose |
 | --- | --- |
 | `sensor.statut_artemis` | Personal status, next planned change, station availability and write capability |
 | `sensor.interventions_artemis` | Number of currently active interventions + structured active-intervention snapshot |
-| `button.cycle_artemis_status` | `IND -> DI1 -> AS1 -> IND`, only until the next already-planned change |
+| `button.cycle_artemis_status` | `IND -> DI1 -> AS1 -> IND`, preserving the next already-planned change when one exists |
 
 There are no separate next-change, availability, active-operation-count or binary sensors in 0.5.x. The useful data is grouped into the two sensors above. Upgrades from older releases automatically remove the retired entity-registry entries so they do not remain visible as unavailable entities.
 
@@ -112,7 +112,7 @@ This single sensor replaces the separate next-change and available-personnel sen
 IND -> DI1 -> AS1 -> IND
 ```
 
-The change applies only from the current time until the **next status boundary that was already planned before the first override**.
+When a future different status is already planned, the change applies only from the current time until that **original planned boundary**.
 
 For example:
 
@@ -128,12 +128,13 @@ now                            Monday 07:00
 
 Monday 07:00 is preserved. Repeated button presses continue to use that same original boundary, including across a Home Assistant restart.
 
+If ARTEMIS has **no future different status** in the planning window (for example an indefinitely `IND` planning), the button remains available. In that case the integration applies the selected status through the contiguous same-status planning horizon currently returned by ARTEMIS, rather than disabling the button just because `next_change` is empty.
+
 The integration refuses the write when:
 
 - the personal planning is read-only;
 - the current/target status is outside `IND`, `DI1`, `AS1`;
 - WebEvo does not advertise the target status;
-- no future planned boundary is available;
 - ARTEMIS requests an ubiquity/conflict confirmation.
 
 It never automatically forces an ubiquity conflict.
@@ -153,6 +154,14 @@ or, when the next change is not today:
 ```text
 🚒 4 dispo · AS1 > 07/10 07:00 > IND
 ```
+
+When there is no future different status, the notification simply stays compact:
+
+```text
+🚒 4 dispo · IND
+```
+
+The action button is still available, for example `-> DI1`.
 
 Behaviour:
 
