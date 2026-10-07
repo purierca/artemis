@@ -158,15 +158,6 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         return self.data.next_change or self.data.current_period_end
 
     @property
-    def effective_override_next_status(self) -> StatusValue | None:
-        """Return the planned status to preserve at the override boundary."""
-        if self._override_is_active():
-            return self._override_next_status
-        if self.data is None:
-            return None
-        return self.data.next_status or self.data.current
-
-    @property
     def status_override_active(self) -> bool:
         return self._override_is_active()
 
@@ -220,20 +211,34 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             start = now.replace(second=0, microsecond=0)
 
             had_override = self._override_is_active(now)
+            preserve_planned_boundary = False
+            planned_next: StatusValue | None = None
+
             if had_override:
+                # A previous press already preserved a real ARTEMIS change. Keep
+                # using that exact boundary across repeated presses.
                 boundary = self._override_boundary
                 planned_next = self._override_next_status
+                preserve_planned_boundary = True
+            elif self.data.next_change is not None and self.data.next_status is not None:
+                # A real different status is planned: never overwrite it.
+                boundary = self.data.next_change
+                planned_next = self.data.next_status
+                preserve_planned_boundary = True
             else:
-                boundary = self.effective_override_boundary
-                planned_next = self.effective_override_next_status
+                # No different future status is planned. WebEvo still exposes a
+                # finite writable planning horizon. Change the current status
+                # through that returned horizon, but do not invent a synthetic
+                # "next status" in Home Assistant.
+                boundary = self.data.current_period_end
 
-            if boundary is None or planned_next is None:
+            if boundary is None:
                 raise HomeAssistantError(
-                    "ARTEMIS did not expose a writable future planning boundary"
+                    "ARTEMIS did not expose a writable current planning window"
                 )
             if start >= boundary:
                 raise HomeAssistantError(
-                    "The next planned ARTEMIS change is too close to safely apply an override"
+                    "The current ARTEMIS planning window is too close to its end to safely apply the change"
                 )
 
             try:
@@ -253,11 +258,12 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                     "ARTEMIS returned no writable planning row for the override window"
                 )
 
-            new_override = not had_override
-            if new_override:
-                # Preserve the original boundary *before* writing. If target_code is
-                # the same as the status planned at that boundary, WebEvo may no
-                # longer expose it as a real status change after the save.
+            new_override = preserve_planned_boundary and not had_override
+            if new_override and planned_next is not None:
+                # Preserve only a *real* originally planned status boundary. When
+                # there is no future different status, the writable planning horizon
+                # is merely a technical write limit and must not appear as a fake
+                # next ARTEMIS change.
                 await self._set_override(boundary, planned_next)
 
             saved_rows = 0
@@ -278,7 +284,21 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                 await self.async_request_refresh()
                 raise HomeAssistantError(str(err)) from err
 
-            await self.async_request_refresh()
+            # WebEvo can acknowledge saveStaff before getPlanning reflects the
+            # changed row. Refresh a few times so Home Assistant (and therefore the
+            # persistent notification action label) normally sees the new current
+            # code immediately instead of one polling cycle later.
+            for delay in (0.0, 0.5, 1.0):
+                if delay:
+                    await asyncio.sleep(delay)
+                await self.async_request_refresh()
+                if (
+                    self.data is not None
+                    and self.data.current is not None
+                    and self.data.current.code == target_code
+                ):
+                    break
+
             return target_code
 
     async def _async_update_data(self) -> PlanningSnapshot:

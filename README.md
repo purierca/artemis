@@ -7,7 +7,7 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo**, initially d
 
 ## What it does
 
-Version **0.5.3** deliberately keeps the Home Assistant surface small:
+Version **0.5.4** deliberately keeps the Home Assistant surface small:
 
 | Entity | Purpose |
 | --- | --- |
@@ -128,7 +128,7 @@ now                            Monday 07:00
 
 Monday 07:00 is preserved. Repeated button presses continue to use that same original boundary, including across a Home Assistant restart.
 
-If ARTEMIS has **no future different status** in the planning window (for example an indefinitely `IND` planning), the button remains available. In that case the integration applies the selected status through the contiguous same-status planning horizon currently returned by ARTEMIS, rather than disabling the button just because `next_change` is empty.
+If ARTEMIS has **no future different status** in the planning window (for example an indefinitely `IND` planning), the button remains available. In that case the integration applies the selected status through the contiguous writable planning horizon currently returned by ARTEMIS. That horizon is treated only as a technical write limit: the integration does **not** invent a fake future status/change in Home Assistant. A later press can therefore cycle the currently active status again even while `next_change` remains empty.
 
 The integration refuses the write when:
 
@@ -167,9 +167,10 @@ Behaviour:
 
 - the notification stays persistent;
 - tapping the notification opens Smartemis;
-- its action button dynamically shows the next cycle status, e.g. `-> AS1`;
+- its action button derives the next cycle status directly from the current `code`, e.g. `DI1` always shows `-> AS1`;
 - tapping that action presses `button.cycle_artemis_status`;
-- the same automation handles both notification refreshes and action taps.
+- after the write, the integration briefly re-reads WebEvo so the new current code is reflected immediately;
+- the same automation handles the action tap **and rebuilds the notification itself**; no separate `ARTEMIS - Changer statut depuis notification` automation is needed.
 
 See [`automation_status_notification.example.yaml`](automation_status_notification.example.yaml).
 
@@ -194,7 +195,7 @@ attributes:
       address: "BEAUFORT - 12 RUE EXEMPLE - 39190"
       latitude: 46.575123
       longitude: 5.438456
-      navigation_uri: "geo:46.575123,5.438456?q=46.575123,5.438456"
+      navigation_uri: "deep-link://geo:46.575123,5.438456?q=46.575123,5.438456"
       state_code: EC
       state_name: EN COURS
       vehicles:
@@ -208,7 +209,7 @@ attributes:
           state_name: SUR LES LIEUX
 ```
 
-If ARTEMIS does not expose a plausible WGS84 GPS pair, `navigation_uri` falls back to an Android `geo:` search for the formatted address. Ambiguous projected `x`/`y` coordinates are deliberately ignored.
+`navigation_uri` is wrapped as a Home Assistant Companion Android `deep-link://geo:...` URI so an actionable-notification button is handed to Android's mapping apps instead of being interpreted as a Home Assistant path. If ARTEMIS does not expose a plausible WGS84 GPS pair, it falls back to a `geo:` search for the formatted address. Ambiguous projected `x`/`y` coordinates are deliberately ignored.
 
 ### Why there is no `new/updated/ended` field
 
