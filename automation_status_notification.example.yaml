@@ -61,7 +61,7 @@ actions:
         {% set available = state_attr('sensor.statut_artemis', 'available_personnel') -%}
         {% set next_raw = state_attr('sensor.statut_artemis', 'next_change') -%}
         {% set next_code = state_attr('sensor.statut_artemis', 'next_code') -%}
-        {% set base = '🚒 ' ~ (available if available is not none else '?') ~ ' dispo · ' ~ current_code -%}
+        {% set base = '' ~ (available if available is not none else '?') ~ ' dispo · ' ~ current_code -%}
         {% if next_raw and next_code -%}
           {% set next_dt = as_local(as_datetime(next_raw)) -%}
           {% set next_when = next_dt.strftime('%H:%M') if next_dt.date() == now().date() else next_dt.strftime('%d/%m %H:%M') -%}
@@ -78,7 +78,8 @@ actions:
         persistent: true
         sticky: true
         alert_once: true
-        notification_icon: mdi:fire-alert
+        notification_icon: mdi:fire-truck
+        color: "#CE2029"
         channel: ARTEMIS Status
 
         # Main notification tap -> Smartemis.

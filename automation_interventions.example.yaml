@@ -24,7 +24,7 @@ actions:
         - action: notify.mobile_app_YOUR_PHONE
           data:
             title: >-
-              🚒 {{ intervention.title }}
+              {{ intervention.title }}
 
             message: |-
               {{ intervention.address }}
@@ -45,13 +45,15 @@ actions:
               priority: high
               ttl: 0
 
-              notification_icon: mdi:fire-alert
+              notification_icon: mdi:fire-truck
+              color: "#CE2029"
               channel: Interventions SPV
 
               # Main notification tap -> Smartemis.
               clickAction: "app://com.sis.smartemis"
 
               # Direct navigation to the ARTEMIS GPS point, with address fallback.
+              # navigation_uri uses deep-link://geo: so Android opens a mapping app.
               actions:
                 - action: URI
                   title: Naviguer
@@ -79,7 +81,7 @@ actions:
         - action: notify.mobile_app_YOUR_PHONE
           data:
             title: >-
-              🚒 {{ intervention.title }}
+              {{ intervention.title }}
 
             message: |-
               {{ intervention.address }}
@@ -98,7 +100,8 @@ actions:
               sticky: false
               alert_once: true
 
-              notification_icon: mdi:fire-alert
+              notification_icon: mdi:fire-truck
+              color: "#CE2029"
               channel: Interventions SPV
               clickAction: "app://com.sis.smartemis"
 
