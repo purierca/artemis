@@ -7,7 +7,7 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo**, initially d
 
 ## What it does
 
-Version **0.5.4** deliberately keeps the Home Assistant surface small:
+Version **0.5.5** deliberately keeps the Home Assistant surface small:
 
 | Entity | Purpose |
 | --- | --- |
@@ -146,31 +146,32 @@ A minimal dashboard button is provided in [`dashboard_cycle_button.example.yaml`
 The included example creates a compact Android notification such as:
 
 ```text
-🚒 4 dispo · DI1 > 18:30 > AS1
+4 dispo · DI1 > 18:30 > AS1
 ```
 
 or, when the next change is not today:
 
 ```text
-🚒 4 dispo · AS1 > 07/10 07:00 > IND
+4 dispo · AS1 > 07/10 07:00 > IND
 ```
 
 When there is no future different status, the notification simply stays compact:
 
 ```text
-🚒 4 dispo · IND
+4 dispo · IND
 ```
 
 The action button is still available, for example `-> DI1`.
 
 Behaviour:
 
+- Android uses the `mdi:fire-truck` notification icon with firefighter red `#CE2029`; no truck emoji is added to the title;
 - the notification stays persistent;
 - tapping the notification opens Smartemis;
 - its action button derives the next cycle status directly from the current `code`, e.g. `DI1` always shows `-> AS1`;
 - tapping that action presses `button.cycle_artemis_status`;
 - after the write, the integration briefly re-reads WebEvo so the new current code is reflected immediately;
-- the same automation handles the action tap **and rebuilds the notification itself**; no separate `ARTEMIS - Changer statut depuis notification` automation is needed.
+- the same automation handles the action tap; the resulting `sensor.statut_artemis` change triggers the normal refresh branch, which rebuilds the notification cleanly; no separate `ARTEMIS - Changer statut depuis notification` automation is needed.
 
 See [`automation_status_notification.example.yaml`](automation_status_notification.example.yaml).
 
@@ -230,7 +231,7 @@ This keeps ARTEMIS polling/state handling in the integration and notification po
 For an active intervention it creates/updates a persistent notification with a stable tag:
 
 ```text
-🚒 SECOURS A PERSONNE
+SECOURS A PERSONNE
 BEAUFORT - 12 RUE EXEMPLE - 39190
 État : EN COURS
 BEAUF : VLTU 01 [PARTI]
@@ -244,7 +245,7 @@ As ARTEMIS updates the operation or vehicle states, the same notification is rep
 When the intervention disappears from the active ARTEMIS snapshot, the automation reuses the **last known snapshot** and updates the same notification to:
 
 ```text
-🚒 SECOURS A PERSONNE
+SECOURS A PERSONNE
 BEAUFORT - 12 RUE EXEMPLE - 39190
 État : Terminée
 BEAUF : VLTU 01 [RETOUR]

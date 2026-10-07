@@ -1,5 +1,5 @@
-alias: "ARTEMIS - Statut permanent"
-description: "Notification compacte avec statut personnel et action de cycle"
+alias: ARTEMIS - Statut permanent
+description: Notification compacte avec statut personnel et action de cycle
 mode: queued
 max: 10
 
@@ -21,8 +21,6 @@ triggers:
 conditions: []
 
 actions:
-  # If this run comes from the Android action button, change the real ARTEMIS
-  # status first. The integration refreshes/validates the new current state.
   - choose:
       - conditions:
           - condition: template
@@ -40,57 +38,48 @@ actions:
             target:
               entity_id: button.cycle_artemis_status
 
-          # Usually already true when button.press returns. This short wait also
-          # covers deployments where WebEvo takes a moment to expose the saved row.
           - wait_template: >-
               {{ state_attr('sensor.statut_artemis', 'code') != previous_code }}
             timeout: "00:00:05"
             continue_on_timeout: true
 
-  # Build/update the same persistent notification for normal status refreshes
-  # and immediately after an action-button press.
-  - condition: template
-    value_template: >-
-      {{ states('sensor.statut_artemis') not in ['unknown', 'unavailable']
-         and state_attr('sensor.statut_artemis', 'code') }}
+    default:
+      - condition: template
+        value_template: >-
+          {{ states('sensor.statut_artemis') not in ['unknown', 'unavailable']
+             and state_attr('sensor.statut_artemis', 'code') }}
 
-  - action: notify.mobile_app_YOUR_PHONE
-    data:
-      title: >-
-        {% set current_code = state_attr('sensor.statut_artemis', 'code') -%}
-        {% set available = state_attr('sensor.statut_artemis', 'available_personnel') -%}
-        {% set next_raw = state_attr('sensor.statut_artemis', 'next_change') -%}
-        {% set next_code = state_attr('sensor.statut_artemis', 'next_code') -%}
-        {% set base = '' ~ (available if available is not none else '?') ~ ' dispo · ' ~ current_code -%}
-        {% if next_raw and next_code -%}
-          {% set next_dt = as_local(as_datetime(next_raw)) -%}
-          {% set next_when = next_dt.strftime('%H:%M') if next_dt.date() == now().date() else next_dt.strftime('%d/%m %H:%M') -%}
-          {{ base ~ ' > ' ~ next_when ~ ' > ' ~ next_code }}
-        {%- else -%}
-          {{ base }}
-        {%- endif %}
+      - action: notify.mobile_app_YOUR_PHONE
+        data:
+          title: >-
+            {% set current_code = state_attr('sensor.statut_artemis', 'code') -%}
+            {% set available = state_attr('sensor.statut_artemis', 'available_personnel') -%}
+            {% set next_raw = state_attr('sensor.statut_artemis', 'next_change') -%}
+            {% set next_code = state_attr('sensor.statut_artemis', 'next_code') -%}
+            {% set base = '' ~ (available if available is not none else '?') ~ ' dispo · ' ~ current_code -%}
+            {% if next_raw and next_code -%}
+              {% set next_dt = as_local(as_datetime(next_raw)) -%}
+              {% set next_when = next_dt.strftime('%H:%M') if next_dt.date() == now().date() else next_dt.strftime('%d/%m %H:%M') -%}
+              {{ base ~ ' > ' ~ next_when ~ ' > ' ~ next_code }}
+            {%- else -%}
+              {{ base }}
+            {%- endif %}
 
-      # Android requires a message. A zero-width space keeps it visually compact.
-      message: "\u200B"
+          message: "\u200B"
 
-      data:
-        tag: artemis_status
-        persistent: true
-        sticky: true
-        alert_once: true
-        notification_icon: mdi:fire-truck
-        color: "#CE2029"
-        channel: ARTEMIS Status
+          data:
+            tag: artemis_status
+            persistent: true
+            sticky: true
+            alert_once: true
+            notification_icon: mdi:fire-truck
+            color: "#CE2029"
+            channel: ARTEMIS Status
+            clickAction: "app://com.sis.smartemis"
 
-        # Main notification tap -> Smartemis.
-        clickAction: "app://com.sis.smartemis"
-
-        # Action button -> next state in IND -> DI1 -> AS1 -> IND.
-        # It is calculated directly from the CURRENT code, not from cached display
-        # data, so DI1 always renders "→ AS1", AS1 renders "→ IND", etc.
-        actions:
-          - action: ARTEMIS_CYCLE_STATUS
-            title: >-
-              {% set current = state_attr('sensor.statut_artemis', 'code') -%}
-              {% set cycle = {'IND': 'DI1', 'DI1': 'AS1', 'AS1': 'IND'} -%}
-              → {{ cycle.get(current, '?') }}
+            actions:
+              - action: ARTEMIS_CYCLE_STATUS
+                title: >-
+                  {% set current = state_attr('sensor.statut_artemis', 'code') -%}
+                  {% set cycle = {'IND': 'DI1', 'DI1': 'AS1', 'AS1': 'IND'} -%}
+                  → {{ cycle.get(current, '?') }}
