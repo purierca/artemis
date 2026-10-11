@@ -265,7 +265,7 @@ class OperationTests(unittest.TestCase):
         self.assertEqual(data["longitude"], 5.438456)
         self.assertEqual(
             data["navigation_uri"],
-            "geo:46.575123,5.438456?q=46.575123,5.438456",
+            "intent://www.google.com/maps/dir/?api=1&destination=46.575123%2C5.438456&travelmode=driving&dir_action=navigate#Intent;scheme=https;package=com.google.android.apps.maps;end",
         )
         self.assertNotIn("message", data)
         self.assertNotIn("lifecycle", data)
@@ -282,8 +282,9 @@ class OperationTests(unittest.TestCase):
         data = helpers.operation_snapshot_data(operation)
         self.assertIsNone(data["latitude"])
         self.assertIsNone(data["longitude"])
-        self.assertTrue(data["navigation_uri"].startswith("geo:0,0?q="))
+        self.assertTrue(data["navigation_uri"].startswith("intent://www.google.com/maps/dir/?api=1&destination="))
         self.assertIn("BEAUFORT", data["navigation_uri"])
+        self.assertIn("package=com.google.android.apps.maps", data["navigation_uri"])
 
     def test_geojson_point_coordinates(self) -> None:
         operation = {

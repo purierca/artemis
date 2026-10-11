@@ -196,7 +196,7 @@ attributes:
       address: "BEAUFORT - 12 RUE EXEMPLE - 39190"
       latitude: 46.575123
       longitude: 5.438456
-      navigation_uri: "deep-link://geo:46.575123,5.438456?q=46.575123,5.438456"
+      navigation_uri: "intent://www.google.com/maps/dir/?api=1&destination=46.575123%2C5.438456&travelmode=driving&dir_action=navigate#Intent;scheme=https;package=com.google.android.apps.maps;end"
       state_code: EC
       state_name: EN COURS
       vehicles:
@@ -210,7 +210,7 @@ attributes:
           state_name: SUR LES LIEUX
 ```
 
-`navigation_uri` is wrapped as a Home Assistant Companion Android `deep-link://geo:...` URI so an actionable-notification button is handed to Android's mapping apps instead of being interpreted as a Home Assistant path. If ARTEMIS does not expose a plausible WGS84 GPS pair, it falls back to a `geo:` search for the formatted address. Ambiguous projected `x`/`y` coordinates are deliberately ignored.
+`navigation_uri` is an explicit Android `intent://` URI targeting the Google Maps package. This avoids Home Assistant interpreting a raw `geo:` URI as a frontend path. ARTEMIS GPS coordinates are used when available; otherwise the formatted intervention address is passed as the Maps destination. Ambiguous projected `x`/`y` coordinates are deliberately ignored.
 
 ### Why there is no `new/updated/ended` field
 

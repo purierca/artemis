@@ -53,12 +53,12 @@ actions:
               clickAction: "app://com.sis.smartemis"
 
               # Direct navigation to the ARTEMIS GPS point, with address fallback.
-              # navigation_uri uses deep-link://geo: so Android opens a mapping app.
+              # navigation_uri is an explicit Android intent targeting Google Maps.
               actions:
                 - action: URI
                   title: Naviguer
                   uri: >-
-                    {{ intervention.navigation_uri or 'app://com.sis.smartemis' }}
+                    {{ intervention.navigation_uri or 'app://com.google.android.apps.maps' }}
 
   # ---------------------------------------------------------------------------
   # Ended interventions: anything present in the previous snapshot but absent
@@ -109,4 +109,4 @@ actions:
                 - action: URI
                   title: Naviguer
                   uri: >-
-                    {{ intervention.navigation_uri or 'app://com.sis.smartemis' }}
+                    {{ intervention.navigation_uri or 'app://com.google.android.apps.maps' }}

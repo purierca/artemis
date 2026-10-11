@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented here.
 
+## 0.5.6
+
+### Fixed
+
+- Fix the Android `Naviguer` notification action by replacing raw/`deep-link://geo:` values with an explicit `intent://` targeting `com.google.android.apps.maps`.
+- Use ARTEMIS WGS84 coordinates as the Google Maps destination when available and keep the formatted intervention address as the fallback destination.
+- Never fall back from the `Naviguer` action to Smartemis; if no location is available, the example falls back to launching Google Maps itself.
+- Keep the main notification tap dedicated to Smartemis.
+
+## 0.5.5
+
+### Fixed
+
+- Isolate `ARTEMIS_CYCLE_STATUS` handling in the status-notification automation.
+- Rebuild the persistent status notification only from the normal sensor refresh path after a status-cycle write.
+- Keep the cycle action label derived directly from the current ARTEMIS code.
+- Use `mdi:fire-truck` with firefighter red `#CE2029` in the notification examples and remove the truck emoji from notification titles.
+
 ## 0.5.4
 
 ### Fixed
