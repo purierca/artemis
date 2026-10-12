@@ -196,7 +196,7 @@ attributes:
       address: "BEAUFORT - 12 RUE EXEMPLE - 39190"
       latitude: 46.575123
       longitude: 5.438456
-      navigation_uri: "intent://www.google.com/maps/dir/?api=1&destination=46.575123%2C5.438456&travelmode=driving&dir_action=navigate#Intent;scheme=https;package=com.google.android.apps.maps;end"
+      navigation_uri: "deep-link://geo:0,0?q=46.575123%2C5.438456"
       state_code: EC
       state_name: EN COURS
       vehicles:
@@ -210,7 +210,7 @@ attributes:
           state_name: SUR LES LIEUX
 ```
 
-`navigation_uri` is an explicit Android `intent://` URI targeting the Google Maps package. This avoids Home Assistant interpreting a raw `geo:` URI as a frontend path. ARTEMIS GPS coordinates are used when available; otherwise the formatted intervention address is passed as the Maps destination. Ambiguous projected `x`/`y` coordinates are deliberately ignored.
+`navigation_uri` uses Home Assistant Companion's `deep-link://` wrapper around Android's standard `geo:` URI. No navigation package is hard-coded: Android opens the user's compatible/default mapping or navigation app (or offers a chooser when applicable). ARTEMIS GPS coordinates are used when available; otherwise the formatted intervention address is used as the destination. Ambiguous projected `x`/`y` coordinates are deliberately ignored.
 
 ### Why there is no `new/updated/ended` field
 
@@ -261,7 +261,7 @@ The final notification is **not cleared**. It becomes dismissible and remains on
 The example also provides:
 
 - main notification tap -> Smartemis;
-- `Naviguer` -> ARTEMIS GPS point when available, otherwise address search;
+- `Naviguer` -> ARTEMIS GPS point when available, otherwise address search, using the user's compatible/default navigation app;
 - one notification per intervention using `artemis_intervention_<id>` as the notification tag;
 - `alert_once` so state/resource updates do not repeatedly alert the phone.
 

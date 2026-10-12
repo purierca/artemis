@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented here.
 
+## 0.5.7
+
+### Fixed
+
+- Make the Android `Naviguer` action application-agnostic instead of forcing Google Maps.
+- Use Home Assistant Companion's documented `deep-link://` wrapper around Android's standard `geo:` URI so Android can dispatch the destination to a compatible/default mapping or navigation app.
+- Keep ARTEMIS WGS84 coordinates as the preferred destination and the formatted intervention address as fallback.
+- Remove the Google Maps package fallback from the intervention automation example; the notification's main tap still opens Smartemis.
+
 ## 0.5.6
 
 ### Fixed

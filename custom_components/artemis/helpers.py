@@ -505,24 +505,18 @@ def operation_coordinates(operation: dict[str, Any]) -> tuple[float | None, floa
 
 
 def operation_navigation_uri(operation: dict[str, Any], address: str = "") -> str:
-    """Return an explicit Android Google Maps navigation intent URI."""
+    """Return an app-agnostic Android map deep link for the operation location."""
     from urllib.parse import quote_plus
 
     latitude, longitude, _source = operation_coordinates(operation)
     if latitude is not None and longitude is not None:
-        destination = f"{latitude:.6f},{longitude:.6f}"
-    elif address and address != "Adresse non communiquee":
-        destination = address
-    else:
-        return ""
+        coordinate = f"{latitude:.6f},{longitude:.6f}"
+        return f"deep-link://geo:0,0?q={quote_plus(coordinate)}"
 
-    encoded_destination = quote_plus(destination)
-    return (
-        "intent://www.google.com/maps/dir/?api=1"
-        f"&destination={encoded_destination}"
-        "&travelmode=driving&dir_action=navigate"
-        "#Intent;scheme=https;package=com.google.android.apps.maps;end"
-    )
+    if address and address != "Adresse non communiquee":
+        return f"deep-link://geo:0,0?q={quote_plus(address)}"
+
+    return ""
 
 def _state_parts(item: dict[str, Any]) -> tuple[str, str]:
     """Return state code and name from a WebEvo object."""
