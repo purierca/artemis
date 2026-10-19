@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented here.
 
+## 0.5.9
+
+### Fixed
+
+- Make personal status writes operate on exactly one freshly re-read current planning row using WebEvo's native `planningStaff/getStaff` endpoint before every save.
+- Never submit cached future planning rows during a notification/dashboard status change.
+- Detect the next already-programmed different status directly from that fresh row and stop the override there when it occurs before the next duty handover.
+- Enforce a hard upper bound at the next 12-hour duty handover even when an older release left a stale distant override boundary in Home Assistant storage.
+- Automatically discard legacy override boundaries that extend beyond the next handover (including the previously observed end-of-look-ahead / 30/11 case).
+- Abort the write unless it resolves to exactly one current operational-day row, providing a fail-safe against accidental future-planning edits.
+- Preserve every period outside the temporary override window in the current row.
+
 ## 0.5.8
 
 ### Fixed

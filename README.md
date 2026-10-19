@@ -137,6 +137,8 @@ On the SDIS 39 deployment, where the operational day starts at 07:00, those hand
 
 Repeated presses before that boundary keep the **same original boundary**, including across a Home Assistant restart, so cycling `IND -> DI1 -> AS1 -> IND` cannot progressively extend the temporary change.
 
+Before every write, the integration re-reads the **exact current operational-day row** from WebEvo. Only that single row may be submitted back to `saveStaff`; all periods outside the temporary override window are preserved unchanged. The write is aborted if it would require more than one planning row. Legacy stored boundaries from older releases are also rejected when they extend beyond the next handover.
+
 The integration refuses the write when:
 
 - the personal planning is read-only;

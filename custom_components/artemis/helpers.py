@@ -68,16 +68,84 @@ def status_override_boundary(
     moment: datetime,
     planning_start: time,
     next_change: datetime | None,
+    preserved_boundary: datetime | None = None,
 ) -> datetime:
     """Return the safe end for a manual status override.
 
-    A real planned status change wins when it occurs before (or exactly at) the
-    next duty handover. Otherwise the override stops at the handover.
+    The boundary can never extend beyond the next duty handover. A real planned
+    status change or an already-preserved earlier boundary wins when it occurs
+    sooner. This also clamps stale boundaries created by older integration
+    versions.
     """
-    handover = next_shift_boundary(moment, planning_start)
-    if next_change is not None and moment < next_change <= handover:
-        return next_change
-    return handover
+    candidates = [next_shift_boundary(moment, planning_start)]
+    if next_change is not None and next_change > moment:
+        candidates.append(next_change)
+    if preserved_boundary is not None and preserved_boundary > moment:
+        candidates.append(preserved_boundary)
+    return min(candidates)
+
+
+def next_staff_row_status_change(
+    staff_day: dict[str, Any],
+    planning_start: time,
+    moment: datetime,
+    tz: ZoneInfo,
+) -> tuple[datetime | None, StatusValue | None]:
+    """Return the next different status from one exact WebEvo staff row.
+
+    This intentionally inspects the fresh row that will be saved instead of the
+    multi-week snapshot used for display. The write path can therefore never
+    skip an already-programmed change present in the row being edited.
+    """
+    day_str = str(staff_day.get("planningStartDate") or "")
+    if not day_str:
+        return None, None
+    try:
+        day = date.fromisoformat(day_str)
+    except ValueError:
+        return None, None
+
+    base = datetime.combine(day, planning_start, tzinfo=tz)
+    intervals: list[PlanningInterval] = []
+    for period in staff_day.get("planningPeriods") or []:
+        state = period.get("state") or {}
+        code = str(state.get("code") or "").strip()
+        if not code:
+            continue
+        name = str(state.get("name") or code).strip()
+        raw_start = period.get("startTime")
+        raw_end = period.get("endTime")
+        start = base + parse_hms(raw_start)
+        end = base + parse_hms(raw_end)
+        if raw_end == "23:59:59":
+            end = base + timedelta(days=1)
+        if end <= start:
+            continue
+        intervals.append(
+            PlanningInterval(
+                start=start,
+                end=end,
+                status=StatusValue(code=code, name=name),
+            )
+        )
+
+    intervals.sort(key=lambda item: (item.start, item.end))
+    current_index: int | None = None
+    for index, interval in enumerate(intervals):
+        if interval.start <= moment < interval.end:
+            current_index = index
+            break
+    if current_index is None:
+        return None, None
+
+    current_code = intervals[current_index].status.code
+    for interval in intervals[current_index + 1 :]:
+        if interval.start <= moment:
+            continue
+        if interval.status.code != current_code:
+            return interval.start, interval.status
+
+    return None, None
 
 
 def normalize_planning(payloads: Iterable[dict[str, Any]], tz: ZoneInfo) -> list[PlanningInterval]:

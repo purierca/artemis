@@ -286,6 +286,21 @@ class ArtemisApi:
         return data
 
 
+    async def async_get_staff(
+        self,
+        planning_id: int | str,
+        staff_id: str,
+    ) -> dict[str, Any]:
+        """Fetch the exact current planning row before editing it."""
+        data = await self._request_json(
+            "GET",
+            f"/artemis-web/api/planningStaff/getStaff/{planning_id}/{staff_id}",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        if not isinstance(data, dict):
+            raise ArtemisConnectionError("Unexpected planningStaff/getStaff response")
+        return data
+
     async def async_save_staff(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Save one personal planning day using WebEvo's planning editor endpoint."""
         data = await self._request_json(

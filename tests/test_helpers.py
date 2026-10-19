@@ -168,6 +168,104 @@ class PlanningTests(unittest.TestCase):
             datetime(2026, 10, 19, 19, 0, tzinfo=tz),
         )
 
+    def test_status_override_boundary_clamps_legacy_distant_boundary(self) -> None:
+        tz = ZoneInfo("Europe/Paris")
+        planning_start = helpers.parse_clock("07:00:00")
+        now = datetime(2026, 10, 19, 9, 30, tzinfo=tz)
+
+        self.assertEqual(
+            helpers.status_override_boundary(
+                now,
+                planning_start,
+                None,
+                datetime(2026, 11, 30, 7, 0, tzinfo=tz),
+            ),
+            datetime(2026, 10, 19, 19, 0, tzinfo=tz),
+        )
+
+    def test_fresh_row_detects_programmed_change_before_handover(self) -> None:
+        tz = ZoneInfo("Europe/Paris")
+        planning_start = helpers.parse_clock("07:00:00")
+        row = {
+            "planningStartDate": "2026-10-19",
+            "planningPeriods": [
+                {
+                    "startTime": "00:00:00",
+                    "endTime": "09:00:00",
+                    "state": {"code": "IND", "name": "INDISPONIBLE"},
+                },
+                {
+                    "startTime": "09:00:00",
+                    "endTime": "12:00:00",
+                    "state": {"code": "AS1", "name": "ASTREINTE NIV 1"},
+                },
+                {
+                    "startTime": "12:00:00",
+                    "endTime": "23:59:59",
+                    "state": {"code": "IND", "name": "INDISPONIBLE"},
+                },
+            ],
+        }
+        change, status = helpers.next_staff_row_status_change(
+            row,
+            planning_start,
+            datetime(2026, 10, 19, 9, 30, tzinfo=tz),
+            tz,
+        )
+        self.assertEqual(change, datetime(2026, 10, 19, 16, 0, tzinfo=tz))
+        self.assertEqual(status.code, "AS1")
+
+    def test_status_write_preserves_programmed_periods_after_boundary(self) -> None:
+        tz = ZoneInfo("Europe/Paris")
+        payload = {
+            "planning": {
+                "fireUnit": {"planningStartTime": "07:00:00"},
+                "staff": [
+                    {
+                        "id": "ME",
+                        "planningId": 123,
+                        "planningStartDate": "2026-10-19",
+                        "priority": 1,
+                        "planningPeriods": [
+                            {
+                                "startTime": "00:00:00",
+                                "endTime": "09:00:00",
+                                "state": {"code": "IND"},
+                            },
+                            {
+                                "startTime": "09:00:00",
+                                "endTime": "12:00:00",
+                                "state": {"code": "AS1"},
+                            },
+                            {
+                                "startTime": "12:00:00",
+                                "endTime": "23:59:59",
+                                "state": {"code": "IND"},
+                            },
+                        ],
+                    }
+                ],
+            }
+        }
+        requests = helpers.build_status_override_requests(
+            [payload],
+            staff_id="ME",
+            start=datetime(2026, 10, 19, 9, 30, tzinfo=tz),
+            end=datetime(2026, 10, 19, 16, 0, tzinfo=tz),
+            new_status_code="DI1",
+            tz=tz,
+        )
+        self.assertEqual(len(requests), 1)
+        periods = requests[0]["staffMember"]["planningPeriods"]
+        self.assertEqual(
+            [p["state"]["code"] for p in periods],
+            ["IND", "DI1", "AS1", "IND"],
+        )
+        self.assertEqual(
+            (periods[2]["realStartTimeHour"], periods[2]["realStartTimeMinute"]),
+            ("16", "0"),
+        )
+
     def test_cycle_status_code(self) -> None:
         self.assertEqual(helpers.cycle_status_code("IND"), "DI1")
         self.assertEqual(helpers.cycle_status_code("DI1"), "AS1")

@@ -32,6 +32,8 @@ from .helpers import (
     build_status_override_requests,
     cycle_status_code,
     normalize_planning,
+    next_shift_boundary,
+    next_staff_row_status_change,
     operation_snapshot_data,
     parse_clock,
     status_override_boundary,
@@ -160,6 +162,7 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             datetime.now(self._tz),
             self._planning_start,
             next_change,
+            self._override_boundary if self._override_is_active() else None,
         )
 
     @property
@@ -215,48 +218,87 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             # current minute so the new active status is visible immediately.
             start = now.replace(second=0, microsecond=0)
 
-            had_override = self._override_is_active(now)
-            planned_next: StatusValue | None = None
-
-            if had_override:
-                # Repeated presses must keep the exact boundary chosen by the
-                # first press, including across a Home Assistant restart.
-                boundary = self._override_boundary
-                planned_next = self._override_next_status
-            else:
-                # Never let an ad-hoc availability change spill across the next
-                # duty handover. If ARTEMIS already has a real status change
-                # before that handover, preserve the earlier real change.
-                real_change = (
-                    self.data.next_change
-                    if self.data.next_status is not None
-                    else None
-                )
-                boundary = status_override_boundary(
-                    now,
-                    self._planning_start,
-                    real_change,
-                )
-                if real_change is not None and boundary == real_change:
-                    planned_next = self.data.next_status
-                else:
-                    # At a synthetic handover boundary the original planning
-                    # simply resumes with the status that was active before the
-                    # manual override.
-                    planned_next = self.data.current
-
-            if boundary is None or planned_next is None:
+            # Resolve the one operational-day row that contains "now". A manual
+            # override is always capped at the next 12-hour handover, so it must
+            # never require editing any later planning row.
+            planning_id = self.planning_id_for(now)
+            if planning_id is None:
                 raise HomeAssistantError(
-                    "ARTEMIS did not expose a safe planning boundary"
-                )
-            if start >= boundary:
-                raise HomeAssistantError(
-                    "The current ARTEMIS planning window is too close to its end to safely apply the change"
+                    "ARTEMIS did not expose the current planning row id"
                 )
 
             try:
+                fresh_row = await self.api.async_get_staff(
+                    planning_id,
+                    self.staff_id,
+                )
+            except (ArtemisAuthError, ArtemisConnectionError) as err:
+                raise HomeAssistantError(str(err)) from err
+
+            # getStaff normally returns these fields, but keep the write path
+            # deterministic if a deployment omits redundant row metadata.
+            local = now.astimezone(self._tz)
+            operational_date = local.date()
+            if local.timetz().replace(tzinfo=None) < self._planning_start:
+                operational_date -= timedelta(days=1)
+            fresh_row = dict(fresh_row)
+            fresh_row.setdefault("id", self.staff_id)
+            fresh_row.setdefault("planningId", planning_id)
+            fresh_row.setdefault("planningStartDate", operational_date.isoformat())
+
+            row_change, row_next_status = next_staff_row_status_change(
+                fresh_row,
+                self._planning_start,
+                now,
+                self._tz,
+            )
+
+            had_override = self._override_is_active(now)
+            preserved_boundary = self._override_boundary if had_override else None
+
+            # Hard safety invariant: the write can never cross the next duty
+            # handover, even if an older release stored a distant boundary such
+            # as the end of the multi-week look-ahead horizon.
+            boundary = status_override_boundary(
+                now,
+                self._planning_start,
+                row_change,
+                preserved_boundary,
+            )
+
+            if row_change is not None and boundary == row_change:
+                planned_next = row_next_status
+            elif (
+                had_override
+                and self._override_boundary is not None
+                and boundary == self._override_boundary
+                and self._override_next_status is not None
+            ):
+                planned_next = self._override_next_status
+            else:
+                # No earlier programmed change: after the handover, keep the
+                # status already present in the untouched part of the row.
+                planned_next = self.data.current
+
+            if planned_next is None or start >= boundary:
+                raise HomeAssistantError(
+                    "ARTEMIS did not expose a safe planning boundary"
+                )
+
+            # Build the save from the exact row just re-read from WebEvo. Never
+            # submit cached future rows: all periods outside [start, boundary)
+            # in this row are copied back unchanged.
+            fresh_payload = {
+                "planning": {
+                    "fireUnit": {
+                        "planningStartTime": self._planning_start.isoformat()
+                    },
+                    "staff": [fresh_row],
+                }
+            }
+            try:
                 requests = build_status_override_requests(
-                    self._payloads,
+                    [fresh_payload],
                     staff_id=self.staff_id,
                     start=start,
                     end=boundary,
@@ -266,9 +308,9 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             except ValueError as err:
                 raise HomeAssistantError(str(err)) from err
 
-            if not requests:
+            if len(requests) != 1:
                 raise HomeAssistantError(
-                    "ARTEMIS returned no writable planning row for the override window"
+                    "ARTEMIS status write was aborted because it did not resolve to exactly one current planning row"
                 )
 
             new_override = not had_override
@@ -366,8 +408,15 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                 raise UpdateFailed("ARTEMIS returned no planning data")
 
             self._payloads = payloads
-            if self._override_boundary is not None and now >= self._override_boundary:
-                await self._clear_override()
+            if self._override_boundary is not None:
+                safe_handover = next_shift_boundary(now, self._planning_start)
+                if (
+                    now >= self._override_boundary
+                    or self._override_boundary > safe_handover
+                ):
+                    # 0.5.3-0.5.8 could persist a boundary derived from the
+                    # multi-week look-ahead. Discard it rather than ever reuse it.
+                    await self._clear_override()
 
             schedule_when = (
                 self._override_boundary
