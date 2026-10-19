@@ -39,6 +39,47 @@ def week_start_for(moment: datetime, planning_start: time = time(7, 0)) -> date:
     return operational_date - timedelta(days=operational_date.weekday())
 
 
+def next_shift_boundary(
+    moment: datetime,
+    planning_start: time = time(7, 0),
+) -> datetime:
+    """Return the next 12-hour duty handover derived from planningStartTime.
+
+    With the SDIS 39 07:00 operational-day start, the handovers are 07:00 and
+    19:00. Using the server-provided planning start keeps the behavior portable.
+    """
+    local_clock = moment.timetz().replace(tzinfo=None)
+    operational_date = moment.date()
+    if local_clock < planning_start:
+        operational_date -= timedelta(days=1)
+
+    operational_start = datetime.combine(
+        operational_date,
+        planning_start,
+        tzinfo=moment.tzinfo,
+    )
+    midpoint = operational_start + timedelta(hours=12)
+    operational_end = operational_start + timedelta(days=1)
+
+    return midpoint if moment < midpoint else operational_end
+
+
+def status_override_boundary(
+    moment: datetime,
+    planning_start: time,
+    next_change: datetime | None,
+) -> datetime:
+    """Return the safe end for a manual status override.
+
+    A real planned status change wins when it occurs before (or exactly at) the
+    next duty handover. Otherwise the override stops at the handover.
+    """
+    handover = next_shift_boundary(moment, planning_start)
+    if next_change is not None and moment < next_change <= handover:
+        return next_change
+    return handover
+
+
 def normalize_planning(payloads: Iterable[dict[str, Any]], tz: ZoneInfo) -> list[PlanningInterval]:
     """Normalize one or more personPlanning responses to absolute intervals."""
     intervals: list[PlanningInterval] = []

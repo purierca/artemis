@@ -128,7 +128,14 @@ now                            Monday 07:00
 
 Monday 07:00 is preserved. Repeated button presses continue to use that same original boundary, including across a Home Assistant restart.
 
-If ARTEMIS has **no future different status** in the planning window (for example an indefinitely `IND` planning), the button remains available. In that case the integration applies the selected status through the contiguous writable planning horizon currently returned by ARTEMIS. That horizon is treated only as a technical write limit: the integration does **not** invent a fake future status/change in Home Assistant. A later press can therefore cycle the currently active status again even while `next_change` remains empty.
+A manual cycle is always bounded by the **earliest** of:
+
+- the next real ARTEMIS status change; or
+- the next 12-hour duty handover derived from ARTEMIS `planningStartTime`.
+
+On the SDIS 39 deployment, where the operational day starts at 07:00, those handovers are **07:00 and 19:00**. An indefinitely `IND` planning therefore never gets overwritten through the whole look-ahead horizon: a press at 09:30 stops at 19:00, and a press at 21:00 stops at 07:00 the next morning.
+
+Repeated presses before that boundary keep the **same original boundary**, including across a Home Assistant restart, so cycling `IND -> DI1 -> AS1 -> IND` cannot progressively extend the temporary change.
 
 The integration refuses the write when:
 

@@ -34,6 +34,7 @@ from .helpers import (
     normalize_planning,
     operation_snapshot_data,
     parse_clock,
+    status_override_boundary,
     week_start_for,
 )
 from .models import (
@@ -143,19 +144,23 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
 
     @property
     def effective_override_boundary(self) -> datetime | None:
-        """Return a safe boundary for a temporary status override.
+        """Return the boundary that a new temporary status override would use.
 
-        Prefer the next real status change. If no different future status is
-        known, fall back to the end of the contiguous same-status planning
-        horizon currently returned by ARTEMIS. This keeps the cycle button
-        usable for an otherwise indefinite status while still never writing
-        beyond planning data that WebEvo actually returned.
+        Manual changes never extend beyond the next duty handover. A real
+        ARTEMIS status change earlier than that handover takes precedence.
         """
         if self._override_is_active():
             return self._override_boundary
-        if self.data is None:
+        if self.data is None or self.data.current is None:
             return None
-        return self.data.next_change or self.data.current_period_end
+        next_change = (
+            self.data.next_change if self.data.next_status is not None else None
+        )
+        return status_override_boundary(
+            datetime.now(self._tz),
+            self._planning_start,
+            next_change,
+        )
 
     @property
     def status_override_active(self) -> bool:
@@ -211,30 +216,38 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             start = now.replace(second=0, microsecond=0)
 
             had_override = self._override_is_active(now)
-            preserve_planned_boundary = False
             planned_next: StatusValue | None = None
 
             if had_override:
-                # A previous press already preserved a real ARTEMIS change. Keep
-                # using that exact boundary across repeated presses.
+                # Repeated presses must keep the exact boundary chosen by the
+                # first press, including across a Home Assistant restart.
                 boundary = self._override_boundary
                 planned_next = self._override_next_status
-                preserve_planned_boundary = True
-            elif self.data.next_change is not None and self.data.next_status is not None:
-                # A real different status is planned: never overwrite it.
-                boundary = self.data.next_change
-                planned_next = self.data.next_status
-                preserve_planned_boundary = True
             else:
-                # No different future status is planned. WebEvo still exposes a
-                # finite writable planning horizon. Change the current status
-                # through that returned horizon, but do not invent a synthetic
-                # "next status" in Home Assistant.
-                boundary = self.data.current_period_end
+                # Never let an ad-hoc availability change spill across the next
+                # duty handover. If ARTEMIS already has a real status change
+                # before that handover, preserve the earlier real change.
+                real_change = (
+                    self.data.next_change
+                    if self.data.next_status is not None
+                    else None
+                )
+                boundary = status_override_boundary(
+                    now,
+                    self._planning_start,
+                    real_change,
+                )
+                if real_change is not None and boundary == real_change:
+                    planned_next = self.data.next_status
+                else:
+                    # At a synthetic handover boundary the original planning
+                    # simply resumes with the status that was active before the
+                    # manual override.
+                    planned_next = self.data.current
 
-            if boundary is None:
+            if boundary is None or planned_next is None:
                 raise HomeAssistantError(
-                    "ARTEMIS did not expose a writable current planning window"
+                    "ARTEMIS did not expose a safe planning boundary"
                 )
             if start >= boundary:
                 raise HomeAssistantError(
@@ -258,12 +271,11 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                     "ARTEMIS returned no writable planning row for the override window"
                 )
 
-            new_override = preserve_planned_boundary and not had_override
-            if new_override and planned_next is not None:
-                # Preserve only a *real* originally planned status boundary. When
-                # there is no future different status, the writable planning horizon
-                # is merely a technical write limit and must not appear as a fake
-                # next ARTEMIS change.
+            new_override = not had_override
+            if new_override:
+                # Preserve the first press boundary, whether it came from a real
+                # ARTEMIS status change or the next duty handover. This prevents
+                # subsequent cycle presses from progressively extending the write.
                 await self._set_override(boundary, planned_next)
 
             saved_rows = 0

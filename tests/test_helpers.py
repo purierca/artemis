@@ -125,6 +125,49 @@ class PlanningTests(unittest.TestCase):
             datetime(2026, 10, 7, 7, 0, tzinfo=tz),
         )
 
+    def test_status_override_boundary_stops_at_next_handover(self) -> None:
+        tz = ZoneInfo("Europe/Paris")
+        planning_start = helpers.parse_clock("07:00:00")
+
+        self.assertEqual(
+            helpers.status_override_boundary(
+                datetime(2026, 10, 19, 9, 30, tzinfo=tz),
+                planning_start,
+                None,
+            ),
+            datetime(2026, 10, 19, 19, 0, tzinfo=tz),
+        )
+        self.assertEqual(
+            helpers.status_override_boundary(
+                datetime(2026, 10, 19, 21, 0, tzinfo=tz),
+                planning_start,
+                None,
+            ),
+            datetime(2026, 10, 20, 7, 0, tzinfo=tz),
+        )
+
+    def test_status_override_boundary_prefers_earlier_real_change(self) -> None:
+        tz = ZoneInfo("Europe/Paris")
+        planning_start = helpers.parse_clock("07:00:00")
+        now = datetime(2026, 10, 19, 9, 30, tzinfo=tz)
+
+        self.assertEqual(
+            helpers.status_override_boundary(
+                now,
+                planning_start,
+                datetime(2026, 10, 19, 16, 0, tzinfo=tz),
+            ),
+            datetime(2026, 10, 19, 16, 0, tzinfo=tz),
+        )
+        self.assertEqual(
+            helpers.status_override_boundary(
+                now,
+                planning_start,
+                datetime(2026, 10, 20, 7, 0, tzinfo=tz),
+            ),
+            datetime(2026, 10, 19, 19, 0, tzinfo=tz),
+        )
+
     def test_cycle_status_code(self) -> None:
         self.assertEqual(helpers.cycle_status_code("IND"), "DI1")
         self.assertEqual(helpers.cycle_status_code("DI1"), "AS1")

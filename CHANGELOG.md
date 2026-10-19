@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented here.
 
+## 0.5.8
+
+### Fixed
+
+- Prevent manual status-cycle writes from extending through the full same-status planning look-ahead horizon (for example to 30/11 when the current status is indefinitely `IND`).
+- Bound every manual status change by the earlier of the next real ARTEMIS status change and the next duty handover.
+- Derive duty handovers from ARTEMIS `planningStartTime` with a 12-hour split; on the SDIS 39 07:00 operational day this means 07:00 / 19:00.
+- Preserve the first override boundary across repeated `IND -> DI1 -> AS1 -> IND` presses and Home Assistant restarts, including when the boundary is a synthetic duty handover.
+- Resume the original planned status at a synthetic handover boundary instead of treating the distant WebEvo planning horizon as the end of the override.
+
 ## 0.5.7
 
 ### Fixed
