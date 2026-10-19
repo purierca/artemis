@@ -3,7 +3,7 @@
 Unofficial Home Assistant custom integration for **ARTEMIS WebEvo**, initially developed and tested against the SDIS 39 deployment.
 
 > [!WARNING]
-> This project is not affiliated with or endorsed by Systel, ARTEMIS, SDIS 39, or any French emergency-service authority. It must **not** be used as the sole alerting, dispatch or operational-information channel.
+> This project is not affiliated with or endorsed by Systel, ARTEMIS, any SDIS, or any French emergency-service authority. It must **not** be used as the sole alerting, dispatch or operational-information channel.
 
 ## What it does
 
