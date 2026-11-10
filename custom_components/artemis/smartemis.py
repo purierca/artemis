@@ -3,6 +3,13 @@
 The Smartemis Android app (6.0.22) uses Apache Thrift JSON over HTTPS. This
 module implements only the subset needed for discovery/authentication and the
 read-only proof of concept; it deliberately avoids any planning write method.
+
+The Android app explicitly calls ``setServerTrustMode("nocheck")`` before its
+native Smartemis requests. Some deployments (including the SIM Montreal test
+server) therefore work in the official app while presenting a certificate
+chain that normal Python TLS validation rejects. The client mirrors that app
+behaviour by default; callers can opt back into normal certificate validation
+with ``verify_ssl=True``.
 """
 
 from __future__ import annotations
@@ -14,9 +21,14 @@ from typing import Any
 import aiohttp
 
 SMARTEMIS_DIRECTORY_URL = "https://smartemis.artemis-solutions.net/subscription/"
+SMARTEMIS_RELEASE_CONTEXT = "2017"
 
 RESULT_OK = 0
 RESULT_AUTHENTICATION_NEEDED = 1
+
+RIGHT_INTERVENTIONS = "SMART:FCT:SY:INTV"
+RIGHT_PARAMETERS = "SMART:FCT:PARAM"
+YES = "O"
 
 
 class SmartemisError(Exception):
@@ -59,6 +71,27 @@ class SmartemisCenter:
     person_id: str | None
     status_code: str | None
     status_name: str | None
+    rights: tuple[str, ...] = ()
+
+    @property
+    def can_view_interventions(self) -> bool | None:
+        """Return the app-advertised intervention right when rights are known."""
+        if not self.rights:
+            return None
+        return RIGHT_INTERVENTIONS in self.rights
+
+
+@dataclass(frozen=True, slots=True)
+class SmartemisUserContext:
+    """Subset of Smartemis user context relevant to read-only data retrieval."""
+
+    center_code: str | None = None
+    profile_code: str | None = None
+    launch_page_code: str | None = None
+    display_interventions: str | None = None
+    display_level: str | None = None
+    severity_levels: tuple[tuple[str | None, str | None], ...] = ()
+    delete_media: str | None = None
 
 
 def _scalar(kind: str, value: Any) -> dict[str, Any]:
@@ -165,12 +198,56 @@ def _ensure_success(
     return _raise_for_result(result, allow_auth_needed=allow_auth_needed)
 
 
+def _right_codes(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        str(item.get(1))
+        for item in value
+        if isinstance(item, dict) and item.get(1)
+    )
+
+
+def _normalize_user_context(value: Any) -> SmartemisUserContext:
+    if not isinstance(value, dict):
+        return SmartemisUserContext()
+    severity_levels = tuple(
+        (
+            str(item.get(1)) if item.get(1) else None,
+            str(item.get(2)) if item.get(2) else None,
+        )
+        for item in (value.get(7) or [])
+        if isinstance(item, dict)
+    )
+    return SmartemisUserContext(
+        center_code=str(value.get(1)) if value.get(1) else None,
+        profile_code=str(value.get(2)) if value.get(2) else None,
+        launch_page_code=str(value.get(3)) if value.get(3) else None,
+        display_interventions=str(value.get(4)) if value.get(4) else None,
+        display_level=str(value.get(5)) if value.get(5) else None,
+        severity_levels=severity_levels,
+        delete_media=str(value.get(8)) if value.get(8) else None,
+    )
+
+
 class SmartemisApi:
     """Async subset of the Smartemis MCentralService/MArtemisService API."""
 
-    def __init__(self, session: aiohttp.ClientSession, *, timeout: int = 20) -> None:
+    def __init__(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        timeout: int = 20,
+        verify_ssl: bool = False,
+    ) -> None:
         self._session = session
         self._timeout = aiohttp.ClientTimeout(total=timeout)
+        self._verify_ssl = verify_ssl
+
+    @property
+    def verify_ssl(self) -> bool:
+        """Whether Smartemis TLS certificates are verified."""
+        return self._verify_ssl
 
     async def _call(
         self,
@@ -182,8 +259,9 @@ class SmartemisApi:
             async with self._session.post(
                 url,
                 data=_request(method, fields),
-                headers={"Content-Type": "application/x-thrift"},
+                headers={"Content-Type": "application/json"},
                 timeout=self._timeout,
+                ssl=self._verify_ssl,
             ) as response:
                 text = await response.text()
                 if response.status >= 400:
@@ -296,9 +374,28 @@ class SmartemisApi:
                     person_id=str(person.get(6)) if person.get(6) else None,
                     status_code=str(person.get(3)) if person.get(3) else None,
                     status_name=str(person.get(4)) if person.get(4) else None,
+                    rights=_right_codes(right.get(2)),
                 )
             )
         return tuple(centers)
+
+    async def async_get_user_context(
+        self,
+        url: str,
+        *,
+        phone_id: str,
+        release_context: str = SMARTEMIS_RELEASE_CONTEXT,
+    ) -> SmartemisUserContext:
+        response = await self._call(
+            url,
+            "getUserContext",
+            {
+                1: _scalar("str", phone_id),
+                2: _scalar("str", release_context),
+            },
+        )
+        _ensure_success(response)
+        return _normalize_user_context(response.get(2))
 
     async def async_get_current_planning(
         self,
@@ -328,15 +425,16 @@ class SmartemisApi:
         center_id: str,
         matricule: str,
         display_level: str = "null",
+        global_view: bool = False,
     ) -> tuple[dict[str, Any], ...]:
         response = await self._call(
             url,
             "getSyItv",
             {
                 1: _scalar("str", phone_id),
-                2: _scalar("str", center_id),
-                3: _scalar("str", matricule),
-                4: _scalar("str", display_level),
+                2: _scalar("str", "null" if global_view else center_id),
+                3: _scalar("str", "null" if global_view else matricule),
+                4: _scalar("str", display_level if global_view else "null"),
             },
         )
         _ensure_success(response)
@@ -345,6 +443,33 @@ class SmartemisApi:
             _normalize_intervention(item)
             for item in raw_items
             if isinstance(item, dict)
+        )
+
+    async def async_get_interventions_for_center(
+        self,
+        url: str,
+        *,
+        phone_id: str,
+        center: SmartemisCenter,
+    ) -> tuple[dict[str, Any], ...]:
+        """Mirror the Smartemis app's intervention request selection.
+
+        The app switches to a global/severity-filtered request only when the
+        subscriber has the PARAMETRES right and the user context has displayItv=O.
+        Otherwise it requests interventions for the selected centre/person.
+        """
+        context = await self.async_get_user_context(url, phone_id=phone_id)
+        global_view = (
+            RIGHT_PARAMETERS in center.rights
+            and context.display_interventions == YES
+        )
+        return await self.async_get_interventions(
+            url,
+            phone_id=phone_id,
+            center_id=center.id,
+            matricule=center.matricule,
+            display_level=context.display_level or "null",
+            global_view=global_view,
         )
 
 
