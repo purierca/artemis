@@ -1,12 +1,13 @@
 # Security policy
 
-ARTEMIS credentials and operational information can be sensitive.
+ARTEMIS/Smartemis credentials, device identifiers and operational information can be sensitive.
 
 ## Do not publish secrets
 
 Never include any of the following in a public GitHub issue, discussion, screenshot or HAR file:
 
-- ARTEMIS username or password;
+- ARTEMIS username/password or Smartemis authentication code;
+- Smartemis device/phone identifiers;
 - CAS tickets;
 - `JSESSIONID`, `MOD_AUTH_CAS_S`, `CASTGC` or other session cookies;
 - the `ssoSha1` hand-off value;
@@ -21,11 +22,11 @@ Do not open a public issue containing exploit details or credentials. Contact th
 
 ## Scope
 
-This integration is intended to use only data that the configured ARTEMIS account is already authorised to access. It does not attempt to bypass authentication, access controls, TLS protections or other security mechanisms.
+This integration is intended to use only data that the configured ARTEMIS/Smartemis account is already authorised to access. It does not bypass authentication or application access controls. The official Smartemis app uses a no-check TLS trust mode; the Smartemis backend mirrors that compatibility behaviour, so only configure a Smartemis server obtained from the official service directory.
 
 ## Personal planning writes
 
-`button.cycle_artemis_status` performs a real write to ARTEMIS, not a Home Assistant-only helper. The implementation is intentionally limited to the authenticated user's personal planning, the `IND` / `DI1` / `AS1` cycle, and the next planned status boundary that existed before the override.
+Smartemis is read-only. On the WebEvo backend, `button.cycle_artemis_status` performs a real write to ARTEMIS, not a Home Assistant-only helper. The implementation is intentionally limited to the authenticated user's personal planning, the `IND` / `DI1` / `AS1` cycle, and the next planned status boundary that existed before the override.
 
 The integration refuses ARTEMIS ubiquity/conflict confirmations rather than forcing them. Do not expose the button or notification action to untrusted Home Assistant users.
 

@@ -1,10 +1,18 @@
 {
-  "title": "ARTEMIS WebEvo",
+  "title": "ARTEMIS / Smartemis",
   "config": {
     "step": {
       "user": {
-        "title": "Connect to ARTEMIS WebEvo",
-        "description": "Connect to the ARTEMIS portal. The default values match the SDIS 39 deployment used to develop this integration. Credentials remain stored in the local Home Assistant configuration.",
+        "title": "Connect ARTEMIS",
+        "description": "Choose the access method used by your fire service.",
+        "menu_options": {
+          "webevo": "ARTEMIS WebEvo",
+          "smartemis": "Smartemis mobile"
+        }
+      },
+      "webevo": {
+        "title": "Connect ARTEMIS WebEvo",
+        "description": "The defaults match the SDIS 39 deployment used to develop the WebEvo backend.",
         "data": {
           "host": "ARTEMIS server",
           "cas_service": "CAS service URL",
@@ -13,26 +21,57 @@
         },
         "data_description": {
           "host": "Public ARTEMIS WebEvo origin, including protocol and hostname.",
-          "cas_service": "CAS service identifier. Keep the default unless your ARTEMIS deployment uses another identifier."
+          "cas_service": "CAS service identifier. Keep the default unless your deployment uses another identifier."
+        }
+      },
+      "smartemis": {
+        "title": "Connect Smartemis",
+        "description": "Choose your service, then enter the same employee identifier and phone number used by the Smartemis app. These two values are used for registration and are not stored in the Home Assistant config entry.",
+        "data": {
+          "smartemis_server": "Fire service",
+          "person_id": "Employee identifier",
+          "mobile": "Phone number"
+        }
+      },
+      "smartemis_auth": {
+        "title": "Smartemis authentication",
+        "description": "This Smartemis server requires the additional code/password requested by the mobile app.",
+        "data": {
+          "password": "Code / password"
         }
       },
       "reauth_confirm": {
-        "title": "Reconnect ARTEMIS",
+        "title": "Reconnect ARTEMIS WebEvo",
         "description": "The ARTEMIS password is no longer accepted. Enter the new password.",
         "data": {
           "password": "Password"
+        }
+      },
+      "reauth_smartemis": {
+        "title": "Reconnect Smartemis",
+        "description": "Re-register the existing Home Assistant device identity with your Smartemis account.",
+        "data": {
+          "person_id": "Employee identifier",
+          "mobile": "Phone number"
+        }
+      },
+      "reauth_smartemis_auth": {
+        "title": "Smartemis authentication",
+        "description": "Enter the additional code/password requested by Smartemis.",
+        "data": {
+          "password": "Code / password"
         }
       }
     },
     "error": {
       "cannot_connect": "Unable to reach ARTEMIS.",
-      "invalid_auth": "ARTEMIS rejected the credentials or SSO hand-off.",
+      "invalid_auth": "ARTEMIS rejected the registration or credentials.",
       "unknown": "Unexpected ARTEMIS error. Check the Home Assistant logs."
     },
     "abort": {
       "already_configured": "This ARTEMIS account is already configured.",
       "reauth_successful": "ARTEMIS has been reconnected.",
-      "unknown": "Unable to find the integration entry to reconnect."
+      "unknown": "Unable to continue the configuration flow."
     }
   }
 }

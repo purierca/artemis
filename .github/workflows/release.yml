@@ -45,5 +45,5 @@ jobs:
 
           gh release create "$VERSION" \
             --target "$TARGET_SHA" \
-            --title "ARTEMIS WebEvo $VERSION" \
+            --title "ARTEMIS / Smartemis $VERSION" \
             --generate-notes

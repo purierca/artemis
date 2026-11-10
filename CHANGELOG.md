@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented here.
 
+## 0.6.0
+
+### Added
+
+- Add Smartemis as a second, read-only backend alongside ARTEMIS WebEvo.
+- Discover fire-service servers from the Smartemis central directory and reproduce the official app registration/authentication flow.
+- Normalize Smartemis personal planning into the existing `sensor.statut_artemis` contract.
+- Normalize Smartemis active interventions into `sensor.interventions_artemis`, including engaged stations, vehicles, vehicle states, addresses, GPS and navigation links.
+- Select the subscriber's own Smartemis centre from user context, with a deterministic fallback for deployments exposing many centres.
+- Validate the Smartemis backend end-to-end against the Service de sécurité incendie de Montréal (SIM).
+
+### Changed
+
+- Keep the Home Assistant entity surface shared across both backends; the WebEvo status-write button remains WebEvo-only.
+- Mirror the official Smartemis app's TLS trust behaviour for deployments using certificate chains rejected by Python's default trust store.
+- Store only the generated Smartemis device identity and selected service/server; employee number, phone number and additional authentication code are used only during registration.
+- Remove accidentally committed Python bytecode/cache files and duplicate repository files under `custom_components/`.
+- Rename the HACS integration to **ARTEMIS / Smartemis**.
+
 ## 0.5.9
 
 ### Fixed

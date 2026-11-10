@@ -1,47 +1,56 @@
-# ARTEMIS WebEvo for Home Assistant
+# ARTEMIS / Smartemis for Home Assistant
 
-Unofficial Home Assistant custom integration for **ARTEMIS WebEvo**, initially developed and tested against the SDIS 39 deployment.
+Unofficial Home Assistant custom integration for **ARTEMIS WebEvo** and the **Smartemis mobile API**.
 
 > [!WARNING]
-> This project is not affiliated with or endorsed by Systel, ARTEMIS, any SDIS, or any French emergency-service authority. It must **not** be used as the sole alerting, dispatch or operational-information channel.
+> This project is not affiliated with or endorsed by Inetum/Systel, ARTEMIS, Smartemis, any SDIS/SIM, or any emergency-service authority. It must **not** be used as the sole alerting, dispatch or operational-information channel.
 
 ## What it does
 
-Version **0.5.5** deliberately keeps the Home Assistant surface small:
+Version **0.6.0** keeps the Home Assistant surface deliberately small:
 
-| Entity | Purpose |
-| --- | --- |
-| `sensor.statut_artemis` | Personal status, next planned change, station availability and write capability |
-| `sensor.interventions_artemis` | Number of currently active interventions + structured active-intervention snapshot |
-| `button.cycle_artemis_status` | `IND -> DI1 -> AS1 -> IND`, preserving the next already-planned change when one exists |
+| Entity | WebEvo | Smartemis | Purpose |
+| --- | --- | --- | --- |
+| `sensor.statut_artemis` | yes | yes | Personal status, next planned change and available-personnel count when exposed |
+| `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, vehicles, address and GPS |
+| `button.cycle_artemis_status` | yes | no | Safe `IND -> DI1 -> AS1 -> IND` WebEvo planning write |
 
-There are no separate next-change, availability, active-operation-count or binary sensors in 0.5.x. The useful data is grouped into the two sensors above. Upgrades from older releases automatically remove the retired entity-registry entries so they do not remain visible as unavailable entities.
+Smartemis support is intentionally **read-only in 0.6.0**. The same sensors and intervention automation work with either backend.
 
-## Architecture
+## Backends
 
-The integration authenticates to WebEvo through the observed CAS/WebEvo login flow and uses only endpoints already available to the configured account.
+### ARTEMIS WebEvo
 
-It intentionally avoids a local intervention lifecycle/state machine:
+The original backend authenticates through the observed CAS/WebEvo flow. It was developed and validated against SDIS 39 and retains the guarded personal-planning write path introduced in 0.5.x.
+
+### Smartemis
+
+The Smartemis backend follows the Apache Thrift JSON protocol used by the official Android app. Configuration:
+
+1. fetches the official Smartemis service list;
+2. lets you select your fire service;
+3. registers Home Assistant using the same employee identifier and phone number used by the app;
+4. asks for the additional Smartemis code/password only when the server requires it.
+
+The employee identifier, phone number and additional authentication code are **not stored** in the Home Assistant config entry. Home Assistant keeps the generated Smartemis device identity plus the selected service/server.
+
+The backend has been validated against the **Service de sécurité incendie de Montréal (SIM)**, including global active interventions, engaged stations/vehicles, vehicle states, addresses and GPS.
+
+## Polling architecture
+
+Both backends normalize their data into the same two sensor snapshots:
 
 ```text
-ARTEMIS synoptic
-      |
-      | poll (WebEvo refresh interval, minimum 15 s)
-      v
+WebEvo synoptic / Smartemis
+            |
+            v
 sensor.interventions_artemis
-      |
-      | Home Assistant compares snapshots
-      v
-notifications / automations / dashboards
+            |
+            v
+Home Assistant automations / notifications / dashboards
 ```
 
-Network refreshes use different cadences to avoid unnecessary ARTEMIS traffic:
-
-- active interventions: WebEvo's advertised synoptic refresh interval, with a 15-second minimum;
-- personal planning: every 5 minutes, plus an exact refresh just after the next known planning boundary;
-- native centre availability counter: every 30 seconds.
-
-`DataUpdateCoordinator` equality checks prevent entity updates when a returned snapshot is unchanged.
+WebEvo keeps its existing independent polling cadences. Smartemis currently polls personal planning and interventions every 30 seconds; intervention detail is refreshed for each active intervention so resource states and GPS remain current.
 
 ## Installation
 
@@ -49,34 +58,16 @@ Network refreshes use different cadences to avoid unnecessary ARTEMIS traffic:
 
 1. Open HACS -> **Integrations**.
 2. Add `https://github.com/purierca/artemis` as a custom repository of type **Integration**.
-3. Install **ARTEMIS WebEvo**.
+3. Install **ARTEMIS / Smartemis**.
 4. Restart Home Assistant.
-5. Go to **Settings -> Devices & services -> Add integration -> ARTEMIS WebEvo**.
+5. Go to **Settings -> Devices & services -> Add integration -> ARTEMIS / Smartemis**.
+6. Choose **ARTEMIS WebEvo** or **Smartemis mobile**.
 
-The defaults match the deployment used during development:
-
-```text
-Host:        https://artemisweb.sdis39.fr
-CAS service: https://artemis/artemis-web
-```
-
-Other WebEvo deployments may use different values or expose different permissions/data structures.
+Existing 0.5.x installations migrate automatically to the WebEvo backend without changing stored credentials.
 
 ### Manual
 
-Copy:
-
-```text
-custom_components/artemis/
-```
-
-into:
-
-```text
-/config/custom_components/artemis/
-```
-
-and restart Home Assistant.
+Copy `custom_components/artemis/` into `/config/custom_components/artemis/` and restart Home Assistant.
 
 ## `sensor.statut_artemis`
 
@@ -106,7 +97,7 @@ This single sensor replaces the separate next-change and available-personnel sen
 
 ## One-button personal status cycle
 
-`button.cycle_artemis_status` performs a real ARTEMIS planning write:
+`button.cycle_artemis_status` is available on the **WebEvo backend only** and performs a real ARTEMIS planning write:
 
 ```text
 IND -> DI1 -> AS1 -> IND
@@ -179,7 +170,7 @@ Behaviour:
 - tapping the notification opens Smartemis;
 - its action button derives the next cycle status directly from the current `code`, e.g. `DI1` always shows `-> AS1`;
 - tapping that action presses `button.cycle_artemis_status`;
-- after the write, the integration briefly re-reads WebEvo so the new current code is reflected immediately;
+- on WebEvo, after the write, the integration briefly re-reads the planning so the new current code is reflected immediately;
 - the same automation handles the action tap; the resulting `sensor.statut_artemis` change triggers the normal refresh branch, which rebuilds the notification cleanly; no separate `ARTEMIS - Changer statut depuis notification` automation is needed.
 
 See [`automation_status_notification.example.yaml`](automation_status_notification.example.yaml).
@@ -188,7 +179,7 @@ Replace `notify.mobile_app_YOUR_PHONE` with your own Companion App notification 
 
 ## `sensor.interventions_artemis`
 
-The sensor state is simply the number of interventions currently returned by the ARTEMIS active synoptic.
+The sensor state is the number of active interventions currently visible to the configured WebEvo or Smartemis account.
 
 The `interventions` attribute is a structured snapshot intended for your own Home Assistant automations. The integration does **not** pre-format the mobile notification.
 
@@ -293,33 +284,20 @@ Never publish unredacted HAR files, automation traces or logs containing operati
 
 ## Authentication and security
 
-Credentials are stored in the local Home Assistant config entry and used to authenticate to the configured WebEvo deployment.
+WebEvo credentials are stored in the local Home Assistant config entry and used only against the configured WebEvo deployment. Smartemis registration uses the employee identifier and phone number transiently; the config entry stores the generated device identifier and selected service/server, not those registration values.
 
-The integration automatically renews the WebEvo session when it detects an authentication redirect/expiry.
+The official Smartemis app disables strict server-certificate verification. The Smartemis backend mirrors that behaviour for compatibility with deployments whose certificate chain is not accepted by the default Python trust store. Treat the configured Smartemis server as trusted.
 
-Never publish:
-
-- ARTEMIS username/password;
-- CAS tickets;
-- `JSESSIONID`, `MOD_AUTH_CAS_S`, `CASTGC` or similar cookies;
-- `ssoSha1` values;
-- identifiable firefighter information;
-- active-operation addresses/GPS/resource data.
-
-See [`SECURITY.md`](SECURITY.md).
+Never publish credentials, device identifiers, session cookies, authentication codes, unredacted logs, or active operational data. See [`SECURITY.md`](SECURITY.md).
 
 ## Compatibility
 
-This integration is based on WebEvo behaviour observed on one deployment. Different SDIS deployments can differ in:
+Validated deployments:
 
-- authentication configuration;
-- permissions;
-- status codes;
-- planning rules;
-- intervention/address/GPS fields;
-- availability-counter access.
+- **ARTEMIS WebEvo:** SDIS 39 (France);
+- **Smartemis:** Service de sécurité incendie de Montréal / SIM (Canada).
 
-Compatibility reports are welcome, but please redact all sensitive data before sharing them.
+Other deployments can differ in authentication policy, permissions, status codes, planning rules and exposed operational fields. Compatibility reports are welcome when all personal and operational data is redacted.
 
 ## Development
 

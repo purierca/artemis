@@ -1,4 +1,4 @@
-"""Data models for ARTEMIS WebEvo."""
+"""Shared normalized data models for ARTEMIS backends."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class PlanningInterval:
 
 @dataclass(slots=True, frozen=True)
 class PlanningSnapshot:
-    """Current personal planning state."""
+    """Current personal planning state shared by WebEvo and Smartemis."""
 
     current: StatusValue | None
     current_since: datetime | None
@@ -37,11 +37,13 @@ class PlanningSnapshot:
     staff_id: str
     unit_id: str
     lookahead_weeks: int
+    available_personnel: int | None = None
+    personnel_in_operation: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
 class CenterAvailabilitySnapshot:
-    """Current native ARTEMIS centre availability counters."""
+    """Current native WebEvo centre availability counters."""
 
     available: int
     in_operation: int

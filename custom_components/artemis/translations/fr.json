@@ -1,10 +1,18 @@
 {
-  "title": "ARTEMIS WebEvo",
+  "title": "ARTEMIS / Smartemis",
   "config": {
     "step": {
       "user": {
+        "title": "Connexion à ARTEMIS",
+        "description": "Choisissez le mode d’accès utilisé par votre service d’incendie.",
+        "menu_options": {
+          "webevo": "ARTEMIS WebEvo",
+          "smartemis": "Smartemis mobile"
+        }
+      },
+      "webevo": {
         "title": "Connexion à ARTEMIS WebEvo",
-        "description": "Connexion au portail ARTEMIS. Les valeurs par défaut correspondent au déploiement SDIS 39 utilisé pour développer l'intégration. Les identifiants restent stockés dans la configuration locale de Home Assistant.",
+        "description": "Les valeurs par défaut correspondent au déploiement SDIS 39 utilisé pour développer le backend WebEvo.",
         "data": {
           "host": "Serveur ARTEMIS",
           "cas_service": "URL de service CAS",
@@ -12,27 +20,58 @@
           "password": "Mot de passe"
         },
         "data_description": {
-          "host": "Origine publique d'ARTEMIS WebEvo, avec protocole et nom d'hôte.",
-          "cas_service": "Identifiant de service CAS. Conserver la valeur par défaut sauf si votre déploiement ARTEMIS utilise un autre identifiant."
+          "host": "Origine publique d’ARTEMIS WebEvo, avec protocole et nom d’hôte.",
+          "cas_service": "Identifiant de service CAS. Conservez la valeur par défaut sauf si votre déploiement en utilise un autre."
+        }
+      },
+      "smartemis": {
+        "title": "Connexion à Smartemis",
+        "description": "Choisissez votre service puis saisissez le même identifiant employé et le même numéro de téléphone que dans l’application Smartemis. Ces deux valeurs servent uniquement à l’enregistrement et ne sont pas conservées dans l’entrée Home Assistant.",
+        "data": {
+          "smartemis_server": "Service d’incendie",
+          "person_id": "Identifiant employé",
+          "mobile": "Numéro de téléphone"
+        }
+      },
+      "smartemis_auth": {
+        "title": "Authentification Smartemis",
+        "description": "Ce serveur Smartemis demande le code/mot de passe supplémentaire utilisé par l’application mobile.",
+        "data": {
+          "password": "Code / mot de passe"
         }
       },
       "reauth_confirm": {
-        "title": "Reconnecter ARTEMIS",
-        "description": "Le mot de passe ARTEMIS n'est plus accepté. Saisissez le nouveau mot de passe.",
+        "title": "Reconnecter ARTEMIS WebEvo",
+        "description": "Le mot de passe ARTEMIS n’est plus accepté. Saisissez le nouveau mot de passe.",
         "data": {
           "password": "Mot de passe"
+        }
+      },
+      "reauth_smartemis": {
+        "title": "Reconnecter Smartemis",
+        "description": "Réenregistrez l’identité Home Assistant existante avec votre compte Smartemis.",
+        "data": {
+          "person_id": "Identifiant employé",
+          "mobile": "Numéro de téléphone"
+        }
+      },
+      "reauth_smartemis_auth": {
+        "title": "Authentification Smartemis",
+        "description": "Saisissez le code/mot de passe supplémentaire demandé par Smartemis.",
+        "data": {
+          "password": "Code / mot de passe"
         }
       }
     },
     "error": {
       "cannot_connect": "Impossible de joindre ARTEMIS.",
-      "invalid_auth": "ARTEMIS a refusé les identifiants ou la transmission SSO.",
+      "invalid_auth": "ARTEMIS a refusé l’enregistrement ou les identifiants.",
       "unknown": "Erreur ARTEMIS inattendue. Consultez les journaux Home Assistant."
     },
     "abort": {
       "already_configured": "Ce compte ARTEMIS est déjà configuré.",
       "reauth_successful": "ARTEMIS est reconnecté.",
-      "unknown": "Impossible de retrouver l'intégration à reconnecter."
+      "unknown": "Impossible de poursuivre la configuration."
     }
   }
 }

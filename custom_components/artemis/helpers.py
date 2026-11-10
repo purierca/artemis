@@ -1,4 +1,4 @@
-"""Pure helpers for ARTEMIS WebEvo data."""
+"""Pure helpers shared by ARTEMIS backends."""
 
 from __future__ import annotations
 
@@ -505,7 +505,7 @@ def operation_addresses(operation: dict[str, Any]) -> list[str]:
 
 
 
-def _coerce_coordinate(value: Any, *, latitude: bool) -> float | None:
+def coerce_coordinate(value: Any, *, latitude: bool) -> float | None:
     """Return a valid WGS84 coordinate or None.
 
     ARTEMIS deployments may expose coordinates using slightly different field
@@ -555,7 +555,7 @@ def operation_coordinates(operation: dict[str, Any]) -> tuple[float | None, floa
         lower = {str(key).lower(): item for key, item in value.items()}
         lat = next(
             (
-                _coerce_coordinate(lower.get(key.lower()), latitude=True)
+                coerce_coordinate(lower.get(key.lower()), latitude=True)
                 for key in latitude_keys
                 if key.lower() in lower
             ),
@@ -563,7 +563,7 @@ def operation_coordinates(operation: dict[str, Any]) -> tuple[float | None, floa
         )
         lon = next(
             (
-                _coerce_coordinate(lower.get(key.lower()), latitude=False)
+                coerce_coordinate(lower.get(key.lower()), latitude=False)
                 for key in longitude_keys
                 if key.lower() in lower
             ),
@@ -576,8 +576,8 @@ def operation_coordinates(operation: dict[str, Any]) -> tuple[float | None, floa
         coordinates = value.get("coordinates")
         point_type = str(value.get("type") or "").lower()
         if point_type == "point" and isinstance(coordinates, (list, tuple)) and len(coordinates) >= 2:
-            lon = _coerce_coordinate(coordinates[0], latitude=False)
-            lat = _coerce_coordinate(coordinates[1], latitude=True)
+            lon = coerce_coordinate(coordinates[0], latitude=False)
+            lat = coerce_coordinate(coordinates[1], latitude=True)
             if lat is not None and lon is not None:
                 return lat, lon
 
@@ -613,19 +613,26 @@ def operation_coordinates(operation: dict[str, Any]) -> tuple[float | None, floa
     return None, None, ""
 
 
-def operation_navigation_uri(operation: dict[str, Any], address: str = "") -> str:
-    """Return an app-agnostic Android map deep link for the operation location."""
+def navigation_uri(
+    latitude: float | None,
+    longitude: float | None,
+    address: str = "",
+) -> str:
+    """Return an app-agnostic Android map deep link."""
     from urllib.parse import quote_plus
 
-    latitude, longitude, _source = operation_coordinates(operation)
     if latitude is not None and longitude is not None:
         coordinate = f"{latitude:.6f},{longitude:.6f}"
         return f"deep-link://geo:0,0?q={quote_plus(coordinate)}"
-
     if address and address != "Adresse non communiquee":
         return f"deep-link://geo:0,0?q={quote_plus(address)}"
-
     return ""
+
+
+def operation_navigation_uri(operation: dict[str, Any], address: str = "") -> str:
+    """Return a navigation URI from a WebEvo operation."""
+    latitude, longitude, _source = operation_coordinates(operation)
+    return navigation_uri(latitude, longitude, address)
 
 def _state_parts(item: dict[str, Any]) -> tuple[str, str]:
     """Return state code and name from a WebEvo object."""

@@ -1,4 +1,4 @@
-"""Button entities for ARTEMIS WebEvo."""
+"""WebEvo status-write button."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import ArtemisRuntimeData
-from .coordinator import ArtemisPlanningCoordinator
+from .const import BACKEND_WEBEVO
 from .helpers import cycle_status_code
 
 
@@ -18,15 +18,13 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up ARTEMIS button entities."""
     runtime: ArtemisRuntimeData = entry.runtime_data
-    async_add_entities([ArtemisCycleStatusButton(runtime)])
+    if runtime.backend == BACKEND_WEBEVO:
+        async_add_entities([ArtemisCycleStatusButton(runtime)])
 
 
-class ArtemisCycleStatusButton(
-    CoordinatorEntity[ArtemisPlanningCoordinator], ButtonEntity
-):
-    """Cycle the current personal status IND -> DI1 -> AS1 -> IND."""
+class ArtemisCycleStatusButton(CoordinatorEntity, ButtonEntity):
+    """Cycle the current WebEvo personal status IND -> DI1 -> AS1 -> IND."""
 
     _attr_name = "Cycle ARTEMIS status"
     _attr_icon = "mdi:account-switch"
@@ -48,10 +46,7 @@ class ArtemisCycleStatusButton(
         ):
             return False
         next_code = cycle_status_code(data.current.code)
-        return (
-            next_code is not None
-            and self.coordinator.is_status_code_available(next_code)
-        )
+        return bool(next_code and self.coordinator.is_status_code_available(next_code))
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -64,7 +59,6 @@ class ArtemisCycleStatusButton(
         }
 
     async def async_press(self) -> None:
-        """Cycle current availability using the safest known planning boundary."""
         await self.coordinator.async_cycle_status()
-        # Reflect the new native ARTEMIS centre counter immediately as well.
-        await self.runtime.center.async_request_refresh()
+        if self.runtime.center is not None:
+            await self.runtime.center.async_request_refresh()

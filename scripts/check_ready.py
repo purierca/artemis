@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +72,29 @@ if placeholder_files:
         "GitHub placeholders remain in repository metadata.\n"
         + "  " + "\n  ".join(sorted(placeholder_files))
     )
+
+tracked = subprocess.run(
+    ["git", "ls-files"],
+    cwd=ROOT,
+    check=True,
+    capture_output=True,
+    text=True,
+).stdout.splitlines()
+junk = [
+    path
+    for path in tracked
+    if "__pycache__/" in path
+    or path.endswith((".pyc", ".pyo"))
+    or path
+    in {
+        "custom_components/CHANGELOG.md",
+        "custom_components/CONTRIBUTING.md",
+        "custom_components/automation_interventions.example.yaml",
+        "custom_components/automation_status_notification.example.yaml",
+    }
+]
+if junk:
+    errors.append("Generated/duplicate files are tracked:\n  " + "\n  ".join(junk))
 
 if errors:
     print("Repository is not ready:\n- " + "\n- ".join(errors), file=sys.stderr)
