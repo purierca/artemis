@@ -2,7 +2,26 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import types
 import unittest
+
+# The repository smoke-test job intentionally installs no Home Assistant/runtime
+# dependencies. Stub aiohttp only when it is absent so this pure protocol suite
+# can still import the client. Home Assistant provides real aiohttp at runtime.
+if importlib.util.find_spec("aiohttp") is None:
+    aiohttp_stub = types.ModuleType("aiohttp")
+
+    class ClientError(Exception):
+        pass
+
+    class ClientTimeout:
+        def __init__(self, *, total=None):
+            self.total = total
+
+    aiohttp_stub.ClientError = ClientError
+    aiohttp_stub.ClientTimeout = ClientTimeout
+    aiohttp_stub.ClientSession = object
+    sys.modules["aiohttp"] = aiohttp_stub
 
 MODULE = Path(__file__).parents[1] / "custom_components" / "artemis" / "smartemis.py"
 spec = importlib.util.spec_from_file_location("smartemis", MODULE)
@@ -20,6 +39,56 @@ class SmartemisProtocolTests(unittest.TestCase):
         self.assertEqual(
             payload,
             '[1,"retrieveSdisList",1,0,{"1":{"rec":{"1":{"str":"abc"}}}}]',
+        )
+
+    def test_record_subscriber_request_matches_apk_struct(self):
+        payload = smartemis._request(
+            "recordSubscriber",
+            {
+                1: smartemis._scalar("str", "0612345678"),
+                2: smartemis._record(
+                    {
+                        1: smartemis._scalar("str", "pid"),
+                        2: smartemis._scalar("str", "emp"),
+                        3: smartemis._scalar("str", "SIM"),
+                        4: smartemis._scalar("tf", 0),
+                    }
+                ),
+                3: smartemis._scalar("tf", 1),
+                4: smartemis._scalar("tf", 1),
+                5: smartemis._scalar("tf", 1),
+            },
+        )
+        self.assertEqual(
+            payload,
+            '[1,"recordSubscriber",1,0,{"1":{"rec":{"1":{"str":"0612345678"},"2":{"rec":{"1":{"str":"pid"},"2":{"str":"emp"},"3":{"str":"SIM"},"4":{"tf":0}}},"3":{"tf":1},"4":{"tf":1},"5":{"tf":1}}}}]',
+        )
+
+    def test_current_planning_request_matches_apk_struct(self):
+        payload = smartemis._request(
+            "getCurrentPlanning",
+            {
+                1: smartemis._scalar("str", "pid"),
+                2: smartemis._scalar("str", "CS"),
+                3: smartemis._scalar("str", "MAT"),
+            },
+        )
+        self.assertEqual(
+            payload,
+            '[1,"getCurrentPlanning",1,0,{"1":{"rec":{"1":{"str":"pid"},"2":{"str":"CS"},"3":{"str":"MAT"}}}}]',
+        )
+
+    def test_user_context_request_matches_apk_struct(self):
+        payload = smartemis._request(
+            "getUserContext",
+            {
+                1: smartemis._scalar("str", "pid"),
+                2: smartemis._scalar("str", "2017"),
+            },
+        )
+        self.assertEqual(
+            payload,
+            '[1,"getUserContext",1,0,{"1":{"rec":{"1":{"str":"pid"},"2":{"str":"2017"}}}}]',
         )
 
     def test_get_sy_itv_request_matches_apk_struct(self):
