@@ -15,7 +15,7 @@ Version **0.6.0** keeps the Home Assistant surface deliberately small:
 | `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, vehicles, address and GPS |
 | `button.cycle_artemis_status` | yes | no | Safe `IND -> DI1 -> AS1 -> IND` WebEvo planning write |
 
-Smartemis support is intentionally **read-only in 0.6.0**. The same sensors and intervention automation work with either backend.
+Smartemis support is read-only. **As of 0.6.1, new Smartemis registrations are temporarily paused** because registering Home Assistant with a new Smartemis device identity may invalidate the official mobile-app session on some deployments. Existing WebEvo installations are unaffected.
 
 ## Backends
 
@@ -25,12 +25,16 @@ The original backend authenticates through the observed CAS/WebEvo flow. It was 
 
 ### Smartemis
 
-The Smartemis backend follows the Apache Thrift JSON protocol used by the official Android app. Configuration:
+The Smartemis backend follows the Apache Thrift JSON protocol used by the official Android app. **New setup is temporarily paused in 0.6.1** while device-registration coexistence is made safe.
 
-1. fetches the official Smartemis service list;
-2. lets you select your fire service;
-3. registers Home Assistant using the same employee identifier and phone number used by the app;
-4. asks for the additional Smartemis code/password only when the server requires it.
+The validated protocol flow is:
+
+1. fetch the official Smartemis service list;
+2. select your fire service;
+3. register a Smartemis device identity for Home Assistant;
+4. complete additional Smartemis authentication when the server requires it.
+
+The registration step is the part currently paused: testing showed that a newly generated `phoneId` can log the existing official Smartemis app out. Do not run the old Python registration test again until this is resolved.
 
 The employee identifier, phone number and additional authentication code are **not stored** in the Home Assistant config entry. Home Assistant keeps the generated Smartemis device identity plus the selected service/server.
 
