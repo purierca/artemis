@@ -473,6 +473,109 @@ class SmartemisApi:
         )
 
 
+    async def async_get_visible_interventions(
+        self,
+        url: str,
+        *,
+        phone_id: str,
+        centers: tuple[SmartemisCenter, ...] | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return every intervention visible to the subscriber.
+
+        The Smartemis UI normally works with one selected centre. For a
+        headless Home Assistant integration there is no such selection, so
+        querying only centers[0] can miss incidents attached to another
+        caserne. This helper mirrors the app's global/severity mode when it is
+        available; otherwise it queries every centre that advertises the
+        intervention right and de-duplicates incidents by id.
+        """
+        if centers is None:
+            centers = await self.async_get_centers(url, phone_id=phone_id)
+
+        explicit = tuple(
+            center
+            for center in centers
+            if RIGHT_INTERVENTIONS in center.rights
+        )
+        eligible = explicit or tuple(center for center in centers if not center.rights)
+        if not eligible:
+            return ()
+
+        context = await self.async_get_user_context(url, phone_id=phone_id)
+        global_center = next(
+            (
+                center
+                for center in eligible
+                if RIGHT_PARAMETERS in center.rights
+                and context.display_interventions == YES
+            ),
+            None,
+        )
+
+        if global_center is not None:
+            rows = await self.async_get_interventions(
+                url,
+                phone_id=phone_id,
+                center_id=global_center.id,
+                matricule=global_center.matricule,
+                display_level=context.display_level or "null",
+                global_view=True,
+            )
+        else:
+            collected: list[dict[str, Any]] = []
+            for center in eligible:
+                collected.extend(
+                    await self.async_get_interventions(
+                        url,
+                        phone_id=phone_id,
+                        center_id=center.id,
+                        matricule=center.matricule,
+                        display_level="null",
+                        global_view=False,
+                    )
+                )
+            rows = tuple(collected)
+
+        result: list[dict[str, Any]] = []
+        seen: set[Any] = set()
+        for item in rows:
+            intervention_id = item.get("id")
+            key = ("id", intervention_id) if intervention_id is not None else (
+                "fallback",
+                item.get("number"),
+                item.get("title"),
+                item.get("created"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(item)
+        return tuple(result)
+
+    async def async_get_intervention_detail(
+        self,
+        url: str,
+        *,
+        phone_id: str,
+        center_id: str,
+        matricule: str,
+        intervention_id: int,
+    ) -> dict[str, Any]:
+        """Return the detail payload used by the Smartemis intervention page."""
+        response = await self._call(
+            url,
+            "getItv",
+            {
+                1: _scalar("str", phone_id),
+                2: _scalar("str", center_id),
+                3: _scalar("str", matricule),
+                4: _scalar("i32", intervention_id),
+            },
+        )
+        _ensure_success(response)
+        return _normalize_intervention_detail(response)
+
+
 def _artemis_date(value: Any) -> str | None:
     return str(value.get(1)) if isinstance(value, dict) and value.get(1) else None
 
@@ -520,6 +623,63 @@ def _normalize_current_planning(response: dict[int, Any]) -> dict[str, Any]:
         "max_personnel": available.get(2) if isinstance(available, dict) else None,
         "priority": response.get(7),
     }
+
+
+
+def _normalize_intervention_detail(response: dict[int, Any]) -> dict[str, Any]:
+    detail = response.get(2) if isinstance(response.get(2), dict) else {}
+    base = response.get(3)
+    units: list[dict[str, Any]] = []
+    vehicles: list[dict[str, Any]] = []
+
+    for unit in detail.get(1) or []:
+        if not isinstance(unit, dict):
+            continue
+        unit_vehicles: list[dict[str, Any]] = []
+        for vehicle in unit.get(5) or []:
+            if not isinstance(vehicle, dict):
+                continue
+            normalized_vehicle = {
+                "id": vehicle.get(3),
+                "name": vehicle.get(4),
+                "state_code": vehicle.get(5),
+                "state_background": vehicle.get(6),
+                "state_foreground": vehicle.get(7),
+                "center_id": unit.get(3),
+                "center_name": unit.get(4),
+            }
+            unit_vehicles.append(normalized_vehicle)
+            vehicles.append(normalized_vehicle)
+        units.append(
+            {
+                "id": unit.get(3),
+                "name": unit.get(4),
+                "vehicles": tuple(unit_vehicles),
+            }
+        )
+
+    addresses = tuple(
+        {
+            "type": address.get(1),
+            "address": address.get(2),
+            # The official app passes [coordY, coordX] to the navigator:
+            # coordX is longitude and coordY is latitude.
+            "longitude": address.get(3),
+            "latitude": address.get(4),
+        }
+        for address in (detail.get(3) or [])
+        if isinstance(address, dict)
+    )
+
+    return {
+        "intervention": (
+            _normalize_intervention(base) if isinstance(base, dict) else None
+        ),
+        "units": tuple(units),
+        "vehicles": tuple(vehicles),
+        "addresses": addresses,
+    }
+
 
 
 def _normalize_intervention(value: dict[int, Any]) -> dict[str, Any]:
