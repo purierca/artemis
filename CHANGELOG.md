@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented here.
 
+## 0.6.1
+
+### Safety
+
+- Temporarily pause new Smartemis registrations and Smartemis re-registration flows.
+- A real-world test showed that registering a new Smartemis `phoneId` may invalidate the existing official mobile-app session on at least one deployment.
+- Existing Smartemis read-only entries can continue using their already-registered device identity, but should not be re-registered until a safe multi-device/reuse flow is implemented.
+- ARTEMIS WebEvo setup and operation are unchanged.
+
 ## 0.6.0
 
 ### Added
