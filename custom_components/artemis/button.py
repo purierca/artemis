@@ -1,4 +1,4 @@
-"""WebEvo status-write button."""
+"""Shared ARTEMIS status-write button."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import ArtemisRuntimeData
-from .const import BACKEND_WEBEVO
 from .helpers import cycle_status_code
 
 
@@ -19,12 +18,11 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     runtime: ArtemisRuntimeData = entry.runtime_data
-    if runtime.backend == BACKEND_WEBEVO:
-        async_add_entities([ArtemisCycleStatusButton(runtime)])
+    async_add_entities([ArtemisCycleStatusButton(runtime)])
 
 
 class ArtemisCycleStatusButton(CoordinatorEntity, ButtonEntity):
-    """Cycle the current WebEvo personal status IND -> DI1 -> AS1 -> IND."""
+    """Cycle the current personal status IND -> DI1 -> AS1 -> IND."""
 
     _attr_name = "Cycle ARTEMIS status"
     _attr_icon = "mdi:account-switch"
