@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any
@@ -9,11 +10,11 @@ from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import SMARTEMIS_UPDATE_INTERVAL
-from .helpers import coerce_coordinate, navigation_uri
+from .helpers import coerce_coordinate, cycle_status_code, navigation_uri
 from .models import OperationsSnapshot, PlanningSnapshot, StatusValue
 from .smartemis import (
     RIGHT_PARAMETERS,
@@ -77,6 +78,82 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         self.staff_id = center.person_id or center.matricule
         self.staff_name = center.person_name
         self._tz = ZoneInfo(hass.config.time_zone)
+        self._write_lock = asyncio.Lock()
+        self._allowed_statuses: dict[str, dict[str, Any]] = {}
+        self._current_period_end_raw: str | None = None
+        self._current_period_end: datetime | None = None
+        self.read_only = True
+
+    @property
+    def effective_next_change(self) -> datetime | None:
+        return self.data.next_change if self.data else None
+
+    @property
+    def effective_next_status(self) -> StatusValue | None:
+        return self.data.next_status if self.data else None
+
+    @property
+    def effective_override_boundary(self) -> datetime | None:
+        return self._current_period_end
+
+    @property
+    def status_override_active(self) -> bool:
+        return False
+
+    def is_status_code_available(self, code: str) -> bool:
+        return code in self._allowed_statuses
+
+    async def async_cycle_status(self) -> str:
+        """Cycle IND -> DI1 -> AS1 -> IND through Smartemis updateCurrentPlanning."""
+
+        async with self._write_lock:
+            await self.async_request_refresh()
+            if self.data is None or self.data.current is None:
+                raise HomeAssistantError("Smartemis current status is unavailable")
+
+            current_code = self.data.current.code
+            target_code = cycle_status_code(current_code)
+            if target_code is None:
+                raise HomeAssistantError(
+                    f"Smartemis status {current_code} is not in the IND/DI1/AS1 cycle"
+                )
+
+            target_status = self._allowed_statuses.get(target_code)
+            if target_status is None:
+                raise HomeAssistantError(
+                    f"Smartemis does not offer status {target_code} for this planning"
+                )
+            if not self._current_period_end_raw:
+                raise HomeAssistantError(
+                    "Smartemis did not expose the current planning period boundary"
+                )
+
+            try:
+                await self.api.async_update_current_planning(
+                    self.server,
+                    phone_id=self.phone_id,
+                    center_id=self.center.id,
+                    matricule=self.center.matricule,
+                    status=target_status,
+                    period_end=self._current_period_end_raw,
+                )
+            except (SmartemisConnectionError, SmartemisServiceError) as err:
+                raise HomeAssistantError(str(err)) from err
+
+            # Re-read until the server exposes the new current status so the
+            # shared Home Assistant sensor/button state updates immediately.
+            for delay in (0.0, 0.5, 1.0):
+                if delay:
+                    await asyncio.sleep(delay)
+                await self.async_request_refresh()
+                if (
+                    self.data is not None
+                    and self.data.current is not None
+                    and self.data.current.code == target_code
+                ):
+                    break
+
+            return target_code
 
     async def _async_update_data(self) -> PlanningSnapshot:
         try:
@@ -93,6 +170,16 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
 
         current_period = payload.get("current_period") or {}
         current = _status_value(current_period.get("status"))
+        self._current_period_end_raw = current_period.get("end")
+        self._current_period_end = _parse_datetime(
+            self._current_period_end_raw, self._tz
+        )
+        self._allowed_statuses = {
+            str(status.get("code")): status
+            for status in (payload.get("allowed_statuses") or ())
+            if isinstance(status, dict) and status.get("code")
+        }
+        self.read_only = not bool(self._allowed_statuses)
         if current is None and self.center.administrative_status_code:
             current = StatusValue(
                 self.center.administrative_status_code,
