@@ -81,71 +81,77 @@ class SmartemisProtocolTests(unittest.TestCase):
             with self.subTest(method=method):
                 self.assertEqual(smartemis._request(method, fields), expected)
 
-    def test_record_subscriber_matches_apk_struct(self):
+    def test_get_subscriber_request_matches_apk_struct(self):
         payload = smartemis._request(
-            "recordSubscriber",
+            "getSubscriber",
             {
-                1: smartemis._scalar("str", "+15145550123"),
-                2: smartemis._record(
-                    {
-                        1: smartemis._scalar("str", "phone"),
-                        2: smartemis._scalar("str", "employee"),
-                        3: smartemis._scalar("str", "SIM"),
-                        4: smartemis._scalar("tf", 0),
-                    }
-                ),
+                1: smartemis._scalar("str", "phone"),
+                2: smartemis._scalar("tf", 1),
                 3: smartemis._scalar("tf", 1),
                 4: smartemis._scalar("tf", 1),
-                5: smartemis._scalar("tf", 1),
             },
         )
-        self.assertIn('"3":{"str":"SIM"}', payload)
-        self.assertIn('"4":{"tf":0}', payload)
-
-    def test_decode_directory_response(self):
-        text = json.dumps(
-            [
-                1,
-                "retrieveSdisList",
-                2,
-                0,
-                {
-                    "0": {
-                        "rec": {
-                            "1": {"rec": {"1": {"str": "OK"}, "2": {"i32": 0}}},
-                            "2": {
-                                "lst": [
-                                    "rec",
-                                    1,
-                                    {
-                                        "1": {"str": "SIM"},
-                                        "2": {
-                                            "lst": [
-                                                "str",
-                                                1,
-                                                "https://example.invalid/smartemis/",
-                                            ]
-                                        },
-                                    },
-                                ]
-                            },
-                        }
-                    }
-                },
-            ]
-        )
-        response = smartemis._decode_response(text, "retrieveSdisList")
-        smartemis._ensure_success(response)
-        sdis = smartemis._normalize_sdis(response[2][0])
-        self.assertEqual(sdis.name, "SIM")
-        self.assertEqual(sdis.urls[0], "https://example.invalid/smartemis/")
-
-    def test_authentication_needed_is_not_an_error_during_registration(self):
-        response = {1: {1: "OK", 2: 1, 3: "Authentication required"}}
         self.assertEqual(
-            smartemis._ensure_success(response, allow_auth_needed=True),
-            smartemis.RESULT_AUTHENTICATION_NEEDED,
+            payload,
+            '[1,"getSubscriber",1,0,{"1":{"rec":{"1":{"str":"phone"},"2":{"tf":1},"3":{"tf":1},"4":{"tf":1}}}}]',
         )
+
+    def test_subscriber_normalization_reuses_existing_identity(self):
+        subscriber = smartemis._normalize_subscriber(
+            {
+                1: "existing-phone-id",
+                2: "PERSON",
+                3: "SIM",
+                4: True,
+            },
+            [
+                {1: smartemis.RIGHT_INTERVENTIONS},
+                {1: "SMART:PO:SPV"},
+            ],
+        )
+        self.assertEqual(subscriber.phone_id, "existing-phone-id")
+        self.assertEqual(subscriber.person_id, "PERSON")
+        self.assertEqual(subscriber.organization, "SIM")
+        self.assertIn("SMART:PO:SPV", subscriber.rights)
+
+    def test_update_current_planning_eop_request_matches_apk_struct(self):
+        payload = smartemis._request(
+            "updateCurrentPlanning",
+            smartemis._update_current_planning_fields(
+                phone_id="phone",
+                center_id="05",
+                matricule="MAT",
+                status={
+                    "code": "DI1",
+                    "name": "DISPONIBLE NIV 1",
+                    "rgb": "00FF00",
+                    "order": 2,
+                },
+                period_end="2026-11-11T19:00:00.0+0100",
+            ),
+        )
+        self.assertEqual(
+            payload,
+            '[1,"updateCurrentPlanning",1,0,{"1":{"rec":{"1":{"str":"phone"},"2":{"str":"05"},"3":{"rec":{"1":{"rec":{"1":{"str":"DI1"},"2":{"str":"DISPONIBLE NIV 1"},"3":{"str":"00FF00"},"4":{"i32":2}}},"3":{"rec":{"1":{"str":"2026-11-11T19:00:00.0+0100"}}}}},"4":{"rec":{"1":{"str":"EOP"}}},"5":{"str":"MAT"}}}}]',
+        )
+
+    def test_update_current_planning_requires_status_and_boundary(self):
+        with self.assertRaises(ValueError):
+            smartemis._update_current_planning_fields(
+                phone_id="phone",
+                center_id="05",
+                matricule="MAT",
+                status={},
+                period_end="2026-11-11T19:00:00.0+0100",
+            )
+        with self.assertRaises(ValueError):
+            smartemis._update_current_planning_fields(
+                phone_id="phone",
+                center_id="05",
+                matricule="MAT",
+                status={"code": "DI1"},
+                period_end="",
+            )
 
     def test_service_error_is_raised(self):
         with self.assertRaises(smartemis.SmartemisServiceError) as ctx:
