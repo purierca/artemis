@@ -181,23 +181,31 @@ class SmartemisProtocolTests(unittest.TestCase):
 
     def test_user_context_decodes_intervention_settings(self):
         context = smartemis._normalize_user_context({1: "05", 4: "O", 5: "CRIT2"})
-        self.assertEqual(context.center_code, "05")
+        self.assertEqual(context.default_center_code, "05")
         self.assertEqual(context.display_interventions, "O")
         self.assertEqual(context.display_level, "CRIT2")
 
-    def test_primary_center_prefers_user_context(self):
-        centers = (_center("02", "N"), _center("05", "X"), _center("08", "N"))
+    def test_primary_center_uses_affiliation_not_default_display_center(self):
+        centers = (_center("02", "N"), _center("05", "X"), _center("30", "N"))
         selected = smartemis.select_primary_center(
-            centers, smartemis.SmartemisUserContext(center_code="5")
+            centers, smartemis.SmartemisUserContext(default_center_code="30")
         )
         self.assertEqual(selected.id, "05")
 
-    def test_primary_center_falls_back_to_single_non_n_profile(self):
+    def test_primary_center_falls_back_to_single_affiliated_profile(self):
         centers = (_center("02", "N"), _center("05", "X"), _center("08", "N"))
         selected = smartemis.select_primary_center(
             centers, smartemis.SmartemisUserContext()
         )
         self.assertEqual(selected.id, "05")
+
+    def test_primary_center_rejects_unaffiliated_only_profiles(self):
+        centers = (_center("02", "N"), _center("30", "N"))
+        with self.assertRaises(smartemis.SmartemisServiceError) as ctx:
+            smartemis.select_primary_center(
+                centers, smartemis.SmartemisUserContext(default_center_code="30")
+            )
+        self.assertEqual(ctx.exception.code, "NO_AFFILIATED_CENTER")
 
     def test_current_planning_normalization(self):
         result = smartemis._normalize_current_planning(
