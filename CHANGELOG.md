@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented here.
 
+## 0.7.0
+
+### Smartemis
+
+- Promote the Smartemis backend after real-world validation against the Service de sécurité incendie de Montréal (SIM).
+- Reuse the exact `phoneId` already registered by the official Smartemis app, allowing Home Assistant and the mobile app to coexist without registering a second device.
+- Resolve the subscriber's real affiliated station instead of the app's default display station.
+- Expose personal planning plus active interventions, engaged stations, vehicles, vehicle states, addresses and GPS through the shared Home Assistant sensors.
+- Keep Smartemis read-only in the Home Assistant entity surface. The app's `updateCurrentPlanning` / `EOP` write protocol is implemented and tested internally but remains unexposed pending a controlled live write/read-back validation.
+
+### Cleanup and safety
+
+- Remove obsolete Smartemis registration code and redundant stored metadata.
+- Remove unused variables, compatibility methods, dead parsing state and duplicate helpers.
+- Centralize Smartemis identity resolution and shared constants.
+- Simplify the WebEvo write path around its safety invariant: one freshly re-read current planning row, one payload and one write.
+- Remove legacy multi-row/multi-day write code that is no longer reachable by the guarded WebEvo workflow.
+- Add Ruff linting to CI alongside Python tests, Hassfest and HACS validation.
+- Existing WebEvo installations continue to migrate automatically and retain the same public entities and guarded write behaviour.
+
 ## 0.6.3
 
 ### Added
