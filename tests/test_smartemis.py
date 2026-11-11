@@ -1,9 +1,8 @@
 import importlib.util
-import json
-from pathlib import Path
 import sys
 import types
 import unittest
+from pathlib import Path
 
 if importlib.util.find_spec("aiohttp") is None:
     aiohttp_stub = types.ModuleType("aiohttp")
