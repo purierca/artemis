@@ -26,7 +26,7 @@ This integration is intended to use only data that the configured ARTEMIS/Smarte
 
 ## Personal planning writes
 
-Smartemis remains read-only in the Home Assistant entity surface. Its `updateCurrentPlanning` protocol is implemented only for controlled validation and is not exposed as a button. On the WebEvo backend, `button.cycle_artemis_status` performs a real write to ARTEMIS, not a Home Assistant-only helper. The implementation is intentionally limited to the authenticated user's personal planning, the `IND` / `DI1` / `AS1` cycle, and the next planned status boundary that existed before the override.
+`button.cycle_artemis_status` performs a real personal-planning write on both backends. WebEvo keeps its guarded single-row override boundary. Smartemis uses the official app's `updateCurrentPlanning` request with `EOP` (end of current period), and only when the target status is explicitly advertised by `getCurrentPlanning`. The public cycle is limited to `IND` / `DI1` / `AS1`.
 
 The integration refuses ARTEMIS ubiquity/conflict confirmations rather than forcing them. Do not expose the button or notification action to untrusted Home Assistant users.
 
