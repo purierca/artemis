@@ -221,6 +221,7 @@ class SmartemisProtocolTests(unittest.TestCase):
             }
         )
         self.assertEqual(result["current_period"]["status"]["code"], "DI1")
+        self.assertEqual(result["allowed_statuses"][0]["code"], "IND")
         self.assertEqual(result["available_personnel"], 4)
 
     def test_intervention_detail_normalization(self):
