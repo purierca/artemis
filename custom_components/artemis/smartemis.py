@@ -71,7 +71,7 @@ class SmartemisCenter:
 class SmartemisUserContext:
     """Smartemis settings needed to select the centre and intervention view."""
 
-    center_code: str | None = None
+    default_center_code: str | None = None
     display_interventions: str | None = None
     display_level: str | None = None
 
@@ -243,7 +243,7 @@ def _normalize_user_context(value: Any) -> SmartemisUserContext:
     if not isinstance(value, dict):
         return SmartemisUserContext()
     return SmartemisUserContext(
-        center_code=str(value.get(1)) if value.get(1) else None,
+        default_center_code=str(value.get(1)) if value.get(1) else None,
         display_interventions=str(value.get(4)) if value.get(4) else None,
         display_level=str(value.get(5)) if value.get(5) else None,
     )
@@ -346,24 +346,41 @@ def select_primary_center(
     centers: tuple[SmartemisCenter, ...],
     context: SmartemisUserContext,
 ) -> SmartemisCenter:
-    """Select the subscriber's own centre without assuming list order."""
+    """Select the subscriber's actual affiliated centre.
+
+    Smartemis user context field 1 is the user's *default displayed centre*
+    (the app labels it "default_cs"), not necessarily the centre where the
+    subscriber is declared. getCsPersListXFct exposes that distinction through
+    person_status_code: "N" means the subscriber is not declared in that
+    centre, while the affiliated centre has another value (observed as "X").
+    """
 
     if not centers:
         raise SmartemisServiceError(None, "NO_CENTER", "Smartemis exposed no centre")
 
-    wanted = _center_key(context.center_code)
-    if wanted:
-        for center in centers:
-            if _center_key(center.id) == wanted:
-                return center
-
-    active = tuple(
+    affiliated = tuple(
         center
         for center in centers
         if center.person_status_code
         and center.person_status_code.strip().upper() != "N"
     )
-    return active[0] if len(active) == 1 else centers[0]
+    if not affiliated:
+        raise SmartemisServiceError(
+            None,
+            "NO_AFFILIATED_CENTER",
+            "Smartemis exposed no centre where the subscriber is declared",
+        )
+
+    if len(affiliated) == 1:
+        return affiliated[0]
+
+    wanted = _center_key(context.default_center_code)
+    if wanted:
+        for center in affiliated:
+            if _center_key(center.id) == wanted:
+                return center
+
+    return affiliated[0]
 
 
 class SmartemisApi:
