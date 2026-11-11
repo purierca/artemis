@@ -318,137 +318,111 @@ def _save_period(
     }
 
 
-def build_status_override_requests(
-    payloads: Iterable[dict[str, Any]],
+def build_status_override_request(
+    staff_day: dict[str, Any],
     *,
     staff_id: str,
+    planning_start: time,
     start: datetime,
     end: datetime,
     new_status_code: str,
     tz: ZoneInfo,
-) -> list[dict[str, Any]]:
-    """Build saveStaff requests changing only [start, end) for one person.
+) -> dict[str, Any]:
+    """Build one safe saveStaff request from one freshly read WebEvo row."""
 
-    Existing planning boundaries outside the override window are preserved.
-    The function may return several requests because WebEvo stores one row per
-    operational day.
-    """
     if end <= start:
-        return []
+        raise ValueError("ARTEMIS status override has an invalid time range")
+    if str(staff_day.get("id") or "") != staff_id:
+        raise ValueError("ARTEMIS returned a planning row for another staff member")
 
-    requests: list[tuple[datetime, dict[str, Any]]] = []
-    seen_rows: set[tuple[str, str]] = set()
+    day_str = str(staff_day.get("planningStartDate") or "")
+    try:
+        day = date.fromisoformat(day_str)
+    except ValueError as err:
+        raise ValueError("ARTEMIS returned an invalid planning date") from err
 
-    for payload in payloads:
-        planning = payload.get("planning") or {}
-        fire_unit = planning.get("fireUnit") or {}
-        planning_start = parse_clock(fire_unit.get("planningStartTime"))
+    operational_start = datetime.combine(day, planning_start, tzinfo=tz)
+    operational_end = operational_start + timedelta(days=1)
+    if start < operational_start or end > operational_end:
+        raise ValueError("ARTEMIS status override must stay within one planning row")
 
-        for staff_day in planning.get("staff") or []:
-            if str(staff_day.get("id") or "") != staff_id:
-                continue
+    planning_id = staff_day.get("planningId")
+    if planning_id in (None, ""):
+        raise ValueError("ARTEMIS did not expose the current planning id")
 
-            day_str = str(staff_day.get("planningStartDate") or "")
-            if not day_str:
-                continue
-            try:
-                day = date.fromisoformat(day_str)
-            except ValueError:
-                continue
+    periods_out: list[dict[str, Any]] = []
+    for period in staff_day.get("planningPeriods") or []:
+        state = period.get("state") or {}
+        original_code = str(state.get("code") or "").strip()
+        if not original_code:
+            continue
 
-            operational_start = datetime.combine(day, planning_start, tzinfo=tz)
-            operational_end = operational_start + timedelta(days=1)
-            if operational_end <= start or operational_start >= end:
-                continue
+        raw_start = period.get("startTime")
+        raw_end = period.get("endTime")
+        period_start = operational_start + parse_hms(raw_start)
+        period_end = operational_start + parse_hms(raw_end)
+        if raw_end == "23:59:59":
+            period_end = operational_end
+        if period_end <= period_start:
+            continue
 
-            planning_id = staff_day.get("planningId")
-            if planning_id in (None, ""):
-                raise ValueError(
-                    f"ARTEMIS did not expose a planning id for {day_str}"
+        overlap_start = max(period_start, start)
+        overlap_end = min(period_end, end)
+        if overlap_end <= overlap_start:
+            periods_out.append(
+                _save_period(
+                    original_code,
+                    period_start,
+                    period_end,
+                    operational_end=operational_end,
                 )
+            )
+            continue
 
-            row_key = (day_str, str(planning_id))
-            if row_key in seen_rows:
-                continue
-            seen_rows.add(row_key)
-
-            periods_out: list[dict[str, Any]] = []
-            for period in staff_day.get("planningPeriods") or []:
-                state = period.get("state") or {}
-                original_code = str(state.get("code") or "").strip()
-                if not original_code:
-                    continue
-
-                raw_start = period.get("startTime")
-                raw_end = period.get("endTime")
-                period_start = operational_start + parse_hms(raw_start)
-                period_end = operational_start + parse_hms(raw_end)
-                if raw_end == "23:59:59":
-                    period_end = operational_end
-                if period_end <= period_start:
-                    continue
-
-                overlap_start = max(period_start, start)
-                overlap_end = min(period_end, end)
-
-                if overlap_end <= overlap_start:
-                    periods_out.append(
-                        _save_period(
-                            original_code,
-                            period_start,
-                            period_end,
-                            operational_end=operational_end,
-                        )
-                    )
-                    continue
-
-                if period_start < overlap_start:
-                    periods_out.append(
-                        _save_period(
-                            original_code,
-                            period_start,
-                            overlap_start,
-                            operational_end=operational_end,
-                        )
-                    )
-
-                periods_out.append(
-                    _save_period(
-                        new_status_code,
-                        overlap_start,
-                        overlap_end,
-                        operational_end=operational_end,
-                    )
+        if period_start < overlap_start:
+            periods_out.append(
+                _save_period(
+                    original_code,
+                    period_start,
+                    overlap_start,
+                    operational_end=operational_end,
                 )
+            )
 
-                if overlap_end < period_end:
-                    periods_out.append(
-                        _save_period(
-                            original_code,
-                            overlap_end,
-                            period_end,
-                            operational_end=operational_end,
-                        )
-                    )
+        periods_out.append(
+            _save_period(
+                new_status_code,
+                overlap_start,
+                overlap_end,
+                operational_end=operational_end,
+            )
+        )
 
-            if not periods_out:
-                continue
+        if overlap_end < period_end:
+            periods_out.append(
+                _save_period(
+                    original_code,
+                    overlap_end,
+                    period_end,
+                    operational_end=operational_end,
+                )
+            )
 
-            request = {
-                "staffMember": {
-                    "id": staff_id,
-                    "planningId": planning_id,
-                    "priority": str(staff_day.get("priority", 10)),
-                    "planningPeriods": periods_out,
-                    "name": str(staff_day.get("name") or ""),
-                    "firstName": str(staff_day.get("firstName") or ""),
-                },
-                "forceUbiquity": False,
-            }
-            requests.append((operational_start, request))
+    if not periods_out:
+        raise ValueError("ARTEMIS current planning row contains no writable periods")
 
-    requests.sort(key=lambda item: item[0])
-    return [request for _day, request in requests]
+    return {
+        "staffMember": {
+            "id": staff_id,
+            "planningId": planning_id,
+            "priority": str(staff_day.get("priority", 10)),
+            "planningPeriods": periods_out,
+            "name": str(staff_day.get("name") or ""),
+            "firstName": str(staff_day.get("firstName") or ""),
+        },
+        "forceUbiquity": False,
+    }
+
 
 def format_address(address: dict[str, Any] | None) -> str:
     """Match the address composition used by ARTEMIS WebEvo."""
