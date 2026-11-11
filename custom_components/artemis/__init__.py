@@ -68,7 +68,6 @@ def _remove_legacy_entities(hass: HomeAssistant, staff_id: str) -> None:
 @dataclass(slots=True)
 class ArtemisRuntimeData:
     backend: str
-    api: ArtemisApi | SmartemisApi
     planning: ArtemisPlanningCoordinator | SmartemisPlanningCoordinator
     operations: ArtemisOperationsCoordinator | SmartemisOperationsCoordinator
     center: ArtemisCenterAvailabilityCoordinator | None = None
@@ -122,7 +121,6 @@ async def _async_setup_webevo(
 
     return ArtemisRuntimeData(
         backend=BACKEND_WEBEVO,
-        api=api,
         planning=planning,
         operations=operations,
         center=center,
@@ -171,7 +169,6 @@ async def _async_setup_smartemis(
 
     return ArtemisRuntimeData(
         backend=BACKEND_SMARTEMIS,
-        api=api,
         planning=planning,
         operations=operations,
     )
@@ -195,7 +192,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime: ArtemisRuntimeData = entry.runtime_data
-    runtime.planning.async_shutdown_artemis()
+    if runtime.backend == BACKEND_WEBEVO:
+        runtime.planning.async_shutdown_artemis()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
