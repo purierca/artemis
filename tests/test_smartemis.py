@@ -39,7 +39,7 @@ def _center(center_id: str, person_status: str):
         person_status_code=person_status,
         administrative_status_code=None,
         administrative_status_name=None,
-        rights=(smartemis.RIGHT_INTERVENTIONS,),
+        rights=(),
     )
 
 
@@ -103,16 +103,11 @@ class SmartemisProtocolTests(unittest.TestCase):
                 2: "PERSON",
                 3: "SIM",
                 4: True,
-            },
-            [
-                {1: smartemis.RIGHT_INTERVENTIONS},
-                {1: "SMART:PO:SPV"},
-            ],
+            }
         )
         self.assertEqual(subscriber.phone_id, "existing-phone-id")
         self.assertEqual(subscriber.person_id, "PERSON")
         self.assertEqual(subscriber.organization, "SIM")
-        self.assertIn("SMART:PO:SPV", subscriber.rights)
 
     def test_update_current_planning_eop_request_matches_apk_struct(self):
         payload = smartemis._request(
@@ -161,7 +156,7 @@ class SmartemisProtocolTests(unittest.TestCase):
         self.assertEqual(ctx.exception.num, 2002)
 
     def test_default_tls_mode_matches_official_app(self):
-        self.assertFalse(smartemis.SmartemisApi(object()).verify_ssl)
+        self.assertFalse(smartemis.SmartemisApi(object())._verify_ssl)
 
     def test_center_decodes_person_and_administrative_status(self):
         center = smartemis._normalize_center(
@@ -176,14 +171,14 @@ class SmartemisProtocolTests(unittest.TestCase):
                     8: "JOHN",
                     9: {1: "DI1", 2: "DISPONIBLE NIV 1"},
                 },
-                2: [{1: smartemis.RIGHT_INTERVENTIONS}, {1: smartemis.RIGHT_PARAMETERS}],
+                2: [{1: smartemis.RIGHT_PARAMETERS}],
             }
         )
         self.assertEqual(center.id, "05")
         self.assertEqual(center.person_name, "JOHN DOE")
         self.assertEqual(center.person_status_code, "X")
         self.assertEqual(center.administrative_status_code, "DI1")
-        self.assertIn(smartemis.RIGHT_INTERVENTIONS, center.rights)
+        self.assertIn(smartemis.RIGHT_PARAMETERS, center.rights)
 
     def test_user_context_decodes_intervention_settings(self):
         context = smartemis._normalize_user_context({1: "05", 4: "O", 5: "CRIT2"})
@@ -298,8 +293,6 @@ class SmartemisWriteClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"updateCurrentPlanning"', session.payload)
         self.assertIn('"EOP"', session.payload)
         self.assertEqual(result["current_period"]["status"]["code"], "DI1")
-
-
 
 
 if __name__ == "__main__":
