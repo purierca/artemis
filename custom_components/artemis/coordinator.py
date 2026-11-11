@@ -24,7 +24,6 @@ from .api import (
 from .const import (
     CENTER_COUNTER_UPDATE_INTERVAL,
     MAX_LOOKAHEAD_WEEKS,
-    OPERATIONS_UPDATE_INTERVAL,
     PLANNING_UPDATE_INTERVAL,
 )
 from .helpers import (
@@ -70,7 +69,6 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             always_update=False,
         )
         self.api = api
-        self.init_data = init_data
         self.unit_id = str(init_data.get("fireunitId") or api.unit_id or "")
         self.staff_id = str(init_data.get("staffId") or "")
         staffs = init_data.get("staffs") or []
@@ -83,7 +81,6 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         self._tz = ZoneInfo(hass.config.time_zone)
         self._planning_start = parse_clock(None)
         self._planning_ids: dict[str, int | str] = {}
-        self._payloads: list[dict] = []
         self._available_status_codes: set[str] = set()
         self.read_only = bool(init_data.get("readOnly", True))
         self._write_lock = asyncio.Lock()
@@ -320,20 +317,14 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                 # subsequent cycle presses from progressively extending the write.
                 await self._set_override(boundary, planned_next)
 
-            saved_rows = 0
             try:
-                for request in requests:
-                    await self.api.async_save_staff(request)
-                    saved_rows += 1
+                await self.api.async_save_staff(requests[0])
             except (
                 ArtemisAuthError,
                 ArtemisConnectionError,
                 ArtemisWriteError,
             ) as err:
-                # If nothing reached the server, discard the new boundary. If some
-                # days were already saved, keep it so a retry still stops at the
-                # originally planned change instead of extending the override.
-                if new_override and saved_rows == 0:
+                if new_override:
                     await self._clear_override()
                 await self.async_request_refresh()
                 raise HomeAssistantError(str(err)) from err
@@ -361,7 +352,8 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             planning_start = parse_clock(None)
             first_week = week_start_for(now, planning_start)
             payloads: list[dict] = []
-            lookahead = 0
+            available_status_codes: set[str] = set()
+            planning_ids: dict[str, int | str] = {}
             snapshot: PlanningSnapshot | None = None
 
             for index in range(MAX_LOOKAHEAD_WEEKS):
@@ -372,12 +364,11 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                     week.isoformat(),
                 )
                 payloads.append(payload)
-                lookahead = index + 1
 
                 for state in payload.get("admStates") or []:
                     code = str((state or {}).get("code") or "").strip()
                     if code:
-                        self._available_status_codes.add(code)
+                        available_status_codes.add(code)
 
                 # Use the server's actual planning-start time as soon as we have it.
                 planning = payload.get("planning") or {}
@@ -390,7 +381,7 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                     planning_date = staff_day.get("planningStartDate")
                     planning_id = staff_day.get("planningId")
                     if planning_date and planning_id not in (None, ""):
-                        self._planning_ids[str(planning_date)] = planning_id
+                        planning_ids[str(planning_date)] = planning_id
 
                 intervals = normalize_planning(payloads, self._tz)
                 snapshot = build_planning_snapshot(
@@ -399,7 +390,6 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                     staff_name=self.staff_name,
                     staff_id=self.staff_id,
                     unit_id=self.unit_id,
-                    lookahead_weeks=lookahead,
                 )
                 if snapshot.current is not None and snapshot.next_change is not None:
                     break
@@ -407,7 +397,10 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             if snapshot is None:
                 raise UpdateFailed("ARTEMIS returned no planning data")
 
-            self._payloads = payloads
+            self._available_status_codes = available_status_codes
+            self._planning_ids = planning_ids
+            self._planning_start = planning_start
+
             if self._override_boundary is not None:
                 safe_handover = next_shift_boundary(now, self._planning_start)
                 if (
@@ -513,7 +506,6 @@ class ArtemisCenterAvailabilityCoordinator(
             return CenterAvailabilitySnapshot(
                 available=int(payload.get("availableCounter") or 0),
                 in_operation=int(payload.get("inOperationCounter") or 0),
-                unit_id=self.planning.unit_id,
             )
         except ArtemisAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
@@ -534,17 +526,12 @@ class ArtemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
         *,
         refresh_seconds: int = 15,
     ) -> None:
-        refresh_seconds = max(15, refresh_seconds)
         super().__init__(
             hass,
             _LOGGER,
             name="ARTEMIS operations",
             config_entry=entry,
-            update_interval=(
-                timedelta(seconds=refresh_seconds)
-                if refresh_seconds
-                else OPERATIONS_UPDATE_INTERVAL
-            ),
+            update_interval=timedelta(seconds=max(15, refresh_seconds)),
             always_update=False,
         )
         self.api = api
