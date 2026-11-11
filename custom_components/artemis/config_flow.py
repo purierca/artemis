@@ -74,7 +74,7 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return SmartemisApi(async_get_clientsession(self.hass))
 
     async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
+        self, _user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="user",
@@ -179,12 +179,11 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             server = user_input[CONF_SMARTEMIS_SERVER]
-            service = services.get(server)
-            if service is None:
+            if server not in services:
                 errors["base"] = "unknown"
             else:
                 try:
-                    subscriber, _context, primary = (
+                    subscriber, _, primary = (
                         await self._smartemis_api().async_get_identity(
                             server, phone_id=phone_id
                         )
