@@ -7,7 +7,7 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo** and the **Sm
 
 ## What it does
 
-Version **0.6.2** keeps the Home Assistant surface deliberately small:
+Version **0.6.3** keeps the Home Assistant surface deliberately small:
 
 | Entity | WebEvo | Smartemis | Purpose |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Version **0.6.2** keeps the Home Assistant surface deliberately small:
 | `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, vehicles, address and GPS |
 | `button.cycle_artemis_status` | yes | no | Safe `IND -> DI1 -> AS1 -> IND` WebEvo planning write |
 
-Smartemis support is read-only. **As of 0.6.1, new Smartemis registrations are temporarily paused** because registering Home Assistant with a new Smartemis device identity may invalidate the official mobile-app session on some deployments. Existing WebEvo installations are unaffected.
+Smartemis support is read-only in Home Assistant. Version **0.6.3** restores safe setup by reusing the exact device identity already registered by the official Smartemis app; Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
 
 ## Backends
 
@@ -25,20 +25,55 @@ The original backend authenticates through the observed CAS/WebEvo flow. It was 
 
 ### Smartemis
 
-The Smartemis backend follows the Apache Thrift JSON protocol used by the official Android app. **New setup is temporarily paused in 0.6.1** while device-registration coexistence is made safe.
+The Smartemis backend follows the Apache Thrift JSON protocol used by the official Android app.
 
-The validated protocol flow is:
+Home Assistant deliberately **does not call `recordSubscriber`**. Smartemis deployments may associate one registered device identity with an account, and registering a new random identity can invalidate the official mobile-app session.
 
-1. fetch the official Smartemis service list;
-2. select your fire service;
-3. register a Smartemis device identity for Home Assistant;
-4. complete additional Smartemis authentication when the server requires it.
+Instead, setup reuses the official app's existing `phoneId`:
 
-The registration step is the part currently paused: testing showed that a newly generated `phoneId` can log the existing official Smartemis app out. Do not run the old Python registration test again until this is resolved.
+1. enter the existing Smartemis `phoneId`;
+2. Home Assistant uses it only to fetch the official service list;
+3. choose the same fire service as in the app;
+4. Home Assistant validates the identity with `getSubscriber(phoneId)`;
+5. all later reads use that same identity in parallel with the mobile app.
 
-The employee identifier, phone number and additional authentication code are **not stored** in the Home Assistant config entry. Home Assistant keeps the generated Smartemis device identity plus the selected service/server.
+The `phoneId` is stored in the Home Assistant config entry and must be treated like a credential.
 
-The backend has been validated against the **Service de sécurité incendie de Montréal (SIM)**, including global active interventions, engaged stations/vehicles, vehicle states, addresses and GPS. Smartemis' `default_cs` setting is treated only as the app's default displayed station; personal planning uses the actual affiliated station exposed by the subscriber profile.
+#### Getting the existing phoneId on Android
+
+Smartemis 6.0.22 stores `device.uuid` as `phoneId`. On Android this comes from the app's Android ID and the app logs the value as `PHONE ID GENERATED` when its local storage is initialised.
+
+With Android platform tools / ADB connected, first check whether the line is still in the device log:
+
+```bash
+adb logcat -d | grep -F "PHONE ID GENERATED"
+```
+
+If it is no longer present:
+
+1. run `adb logcat -c`;
+2. start a live capture:
+
+   ```bash
+   adb logcat | grep -F "PHONE ID GENERATED"
+   ```
+
+3. in Android settings, clear **Smartemis app storage/data**;
+4. launch Smartemis once;
+5. copy the value printed after `PHONE ID GENERATED`;
+6. sign back into the official Smartemis app normally;
+7. use that exact value in Home Assistant.
+
+Clearing app storage signs the app out and removes its local settings, so make sure you can sign back in first. Do **not** use a random UUID and do not use `adb shell settings get secure android_id` as a substitute on modern Android: the identifier exposed to an app can be scoped to the app signing key/user/device.
+
+The backend has been validated against the **Service de sécurité incendie de Montréal (SIM)** for authentication reuse and read access, including global active interventions, engaged stations/vehicles, vehicle states, addresses and GPS. Smartemis' `default_cs` setting is treated only as the app's default displayed station; personal planning uses the actual affiliated station exposed by the subscriber profile.
+
+#### Smartemis status changes
+
+The official app changes current availability through `updateCurrentPlanning`. The integration now implements and tests that exact Thrift request internally using the safest app boundary, `EOP` (end of current planning period).
+
+It is **not exposed as a Home Assistant button yet**. A controlled real-account write/read-back test is required before enabling it publicly.
+
 
 ## Polling architecture
 
@@ -288,7 +323,7 @@ Never publish unredacted HAR files, automation traces or logs containing operati
 
 ## Authentication and security
 
-WebEvo credentials are stored in the local Home Assistant config entry and used only against the configured WebEvo deployment. Smartemis registration uses the employee identifier and phone number transiently; the config entry stores the generated device identifier and selected service/server, not those registration values.
+WebEvo credentials are stored in the local Home Assistant config entry and used only against the configured WebEvo deployment. Smartemis setup stores the existing mobile-app `phoneId` plus the selected service/server. It never registers a second Smartemis device. Treat the `phoneId` as a credential and never publish it.
 
 The official Smartemis app disables strict server-certificate verification. The Smartemis backend mirrors that behaviour for compatibility with deployments whose certificate chain is not accepted by the default Python trust store. Treat the configured Smartemis server as trusted.
 
