@@ -190,6 +190,7 @@ def _status(value: Any) -> dict[str, Any] | None:
         "code": value.get(1),
         "name": value.get(2),
         "rgb": value.get(3),
+        "order": value.get(4),
     }
 
 
@@ -287,6 +288,11 @@ def _normalize_current_planning(response: dict[int, Any]) -> dict[str, Any]:
             period
             for raw in (response.get(4) or [])
             if (period := _normalize_period(raw)) is not None
+        ),
+        "allowed_statuses": tuple(
+            status
+            for raw in (response.get(5) or [])
+            if (status := _status(raw)) is not None
         ),
         "available_personnel": (
             available.get(1) if isinstance(available, dict) else None
@@ -573,10 +579,8 @@ class SmartemisApi:
     ) -> dict[str, Any]:
         """Change current Smartemis status until the current period boundary.
 
-        This mirrors the official app's updateCurrentPlanning request with the
-        safest boundary type, EOP (end of current period). The Home Assistant
-        integration does not expose this write yet; it is kept behind the
-        client API until a live write/read-back validation has been completed.
+        This mirrors the official app's updateCurrentPlanning request with
+        boundary type EOP (end of current period).
         """
 
         response = await self._call(
