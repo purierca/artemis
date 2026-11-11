@@ -13,9 +13,9 @@ Version **0.7.0** keeps the Home Assistant surface deliberately small:
 | --- | --- | --- | --- |
 | `sensor.statut_artemis` | yes | yes | Personal status, next planned change and available-personnel count when exposed |
 | `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, vehicles, address and GPS |
-| `button.cycle_artemis_status` | yes | no | Safe `IND -> DI1 -> AS1 -> IND` WebEvo planning write |
+| `button.cycle_artemis_status` | yes | yes | `IND -> DI1 -> AS1 -> IND` personal status cycle when the backend advertises those statuses |
 
-Smartemis support is read-only in Home Assistant. Version **0.7.0** reuses the exact device identity already registered by the official Smartemis app; Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
+Version **0.7.0** reuses the exact Smartemis device identity already registered by the official app and exposes the same status-cycle button on both backends. Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
 
 ## Backends
 
@@ -70,9 +70,17 @@ The backend has been validated against the **Service de sécurité incendie de M
 
 #### Smartemis status changes
 
-The official app changes current availability through `updateCurrentPlanning`. The integration now implements and tests that exact Thrift request internally using the safest app boundary, `EOP` (end of current planning period).
+The official app changes current availability through `updateCurrentPlanning`. Version 0.7.0 exposes that same write through the shared `button.cycle_artemis_status`.
 
-It is **not exposed as a Home Assistant button yet**. A controlled real-account write/read-back test is required before enabling it publicly.
+Smartemis writes use `EOP` (end of current planning period), exactly as the app protocol does. Before every press the integration re-reads `getCurrentPlanning`, requires the target status to be explicitly listed by the server, sends the write for the authenticated subscriber's affiliated station/matricule, then re-reads until the new status is visible.
+
+The public cycle is identical on both backends:
+
+```text
+IND -> DI1 -> AS1 -> IND
+```
+
+If a Smartemis deployment does not expose one of those status codes or does not grant write rights, the button is unavailable rather than forcing a write.
 
 
 ## Polling architecture
@@ -136,13 +144,13 @@ This single sensor replaces the separate next-change and available-personnel sen
 
 ## One-button personal status cycle
 
-`button.cycle_artemis_status` is available on the **WebEvo backend only** and performs a real ARTEMIS planning write:
+`button.cycle_artemis_status` is the same entity on **WebEvo and Smartemis** and performs a real personal-planning write:
 
 ```text
 IND -> DI1 -> AS1 -> IND
 ```
 
-When a future different status is already planned, the change applies only from the current time until that **original planned boundary**.
+On WebEvo, when a future different status is already planned, the change applies only from the current time until that **original planned boundary**. On Smartemis, the official app protocol uses the current period's `EOP` boundary.
 
 For example:
 
@@ -173,8 +181,9 @@ The integration refuses the write when:
 
 - the personal planning is read-only;
 - the current/target status is outside `IND`, `DI1`, `AS1`;
-- WebEvo does not advertise the target status;
-- ARTEMIS requests an ubiquity/conflict confirmation.
+- the active backend does not advertise the target status;
+- Smartemis does not expose a current-period boundary;
+- WebEvo requests an ubiquity/conflict confirmation.
 
 It never automatically forces an ubiquity conflict.
 
@@ -209,7 +218,7 @@ Behaviour:
 - tapping the notification opens Smartemis;
 - its action button derives the next cycle status directly from the current `code`, e.g. `DI1` always shows `-> AS1`;
 - tapping that action presses `button.cycle_artemis_status`;
-- on WebEvo, after the write, the integration briefly re-reads the planning so the new current code is reflected immediately;
+- after a write on either backend, the integration briefly re-reads the planning so the new current code is reflected immediately;
 - the same automation handles the action tap; the resulting `sensor.statut_artemis` change triggers the normal refresh branch, which rebuilds the notification cleanly; no separate `ARTEMIS - Changer statut depuis notification` automation is needed.
 
 See [`automation_status_notification.example.yaml`](automation_status_notification.example.yaml).
