@@ -39,7 +39,18 @@ jobs:
         shell: bash
         run: |
           if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "Release $VERSION already exists; nothing to do."
+            if [ "$VERSION" = "0.7.0" ]; then
+              CURRENT_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" --jq '.object.sha')"
+              if [ "$CURRENT_SHA" != "$TARGET_SHA" ]; then
+                gh api \
+                  --method PATCH \
+                  "repos/$GITHUB_REPOSITORY/git/refs/tags/$VERSION" \
+                  -f sha="$TARGET_SHA" \
+                  -F force=true >/dev/null
+                echo "Retargeted release $VERSION from $CURRENT_SHA to $TARGET_SHA."
+              fi
+            fi
+            echo "Release $VERSION already exists."
             exit 0
           fi
 
