@@ -9,6 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import ArtemisRuntimeData
+from .const import BACKEND_WEBEVO
 from .helpers import cycle_status_code
 
 
@@ -54,9 +55,18 @@ class ArtemisStatusSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         data = self.coordinator.data
         current = data.current if data else None
-        next_status = self.coordinator.effective_next_status
-        next_change = self.coordinator.effective_next_change
-        cycle_until = self.coordinator.effective_override_boundary
+        is_webevo = self.runtime.backend == BACKEND_WEBEVO
+        next_status = (
+            self.coordinator.effective_next_status
+            if is_webevo
+            else (data.next_status if data else None)
+        )
+        next_change = (
+            self.coordinator.effective_next_change
+            if is_webevo
+            else (data.next_change if data else None)
+        )
+        cycle_until = self.coordinator.effective_override_boundary if is_webevo else None
 
         center = (
             self.runtime.center.data
@@ -72,9 +82,10 @@ class ArtemisStatusSensor(CoordinatorEntity, SensorEntity):
 
         current_code = current.code if current else None
         cycle_next = cycle_status_code(current_code) if current_code else None
+        writable = is_webevo and not self.coordinator.read_only
         can_cycle = bool(
-            cycle_next
-            and not self.coordinator.read_only
+            writable
+            and cycle_next
             and self.coordinator.is_status_code_available(cycle_next)
         )
 
@@ -88,8 +99,8 @@ class ArtemisStatusSensor(CoordinatorEntity, SensorEntity):
             "personnel_in_operation": in_operation,
             "center": data.unit_id if data else None,
             "person": data.staff_name if data else None,
-            "override_active": self.coordinator.status_override_active,
-            "writable": not self.coordinator.read_only,
+            "override_active": self.coordinator.status_override_active if is_webevo else False,
+            "writable": writable,
             "can_cycle": can_cycle,
             "cycle_next_code": cycle_next if can_cycle else None,
             "cycle_until": cycle_until,
