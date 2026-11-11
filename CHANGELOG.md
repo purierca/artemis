@@ -10,7 +10,7 @@ All notable changes to this project will be documented here.
 - Reuse the exact `phoneId` already registered by the official Smartemis app, allowing Home Assistant and the mobile app to coexist without registering a second device.
 - Resolve the subscriber's real affiliated station instead of the app's default display station.
 - Expose personal planning plus active interventions, engaged stations, vehicles, vehicle states, addresses and GPS through the shared Home Assistant sensors.
-- Keep Smartemis read-only in the Home Assistant entity surface. The app's `updateCurrentPlanning` / `EOP` write protocol is implemented and tested internally but remains unexposed pending a controlled live write/read-back validation.
+- Expose the same `button.cycle_artemis_status` on Smartemis and WebEvo. Smartemis uses the official app `updateCurrentPlanning` request with `EOP`, requires the target status to be explicitly advertised by `getCurrentPlanning`, and re-reads the planning after each write.
 
 ### Cleanup and safety
 
