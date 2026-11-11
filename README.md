@@ -7,7 +7,7 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo** and the **Sm
 
 ## What it does
 
-Version **0.6.3** keeps the Home Assistant surface deliberately small:
+Version **0.7.0** keeps the Home Assistant surface deliberately small:
 
 | Entity | WebEvo | Smartemis | Purpose |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Version **0.6.3** keeps the Home Assistant surface deliberately small:
 | `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, vehicles, address and GPS |
 | `button.cycle_artemis_status` | yes | no | Safe `IND -> DI1 -> AS1 -> IND` WebEvo planning write |
 
-Smartemis support is read-only in Home Assistant. Version **0.6.3** restores safe setup by reusing the exact device identity already registered by the official Smartemis app; Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
+Smartemis support is read-only in Home Assistant. Version **0.7.0** reuses the exact device identity already registered by the official Smartemis app; Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
 
 ## Backends
 
