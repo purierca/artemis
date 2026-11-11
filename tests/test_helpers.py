@@ -210,48 +210,41 @@ class PlanningTests(unittest.TestCase):
 
     def test_status_write_preserves_programmed_periods_after_boundary(self) -> None:
         tz = ZoneInfo("Europe/Paris")
-        payload = {
-            "planning": {
-                "fireUnit": {"planningStartTime": "07:00:00"},
-                "staff": [
-                    {
-                        "id": "ME",
-                        "planningId": 123,
-                        "planningStartDate": "2026-10-19",
-                        "priority": 1,
-                        "planningPeriods": [
-                            {
-                                "startTime": "00:00:00",
-                                "endTime": "09:00:00",
-                                "state": {"code": "IND"},
-                            },
-                            {
-                                "startTime": "09:00:00",
-                                "endTime": "12:00:00",
-                                "state": {"code": "AS1"},
-                            },
-                            {
-                                "startTime": "12:00:00",
-                                "endTime": "23:59:59",
-                                "state": {"code": "IND"},
-                            },
-                        ],
-                    }
-                ],
-            }
+        row = {
+            "id": "ME",
+            "planningId": 123,
+            "planningStartDate": "2026-10-19",
+            "priority": 1,
+            "planningPeriods": [
+                {
+                    "startTime": "00:00:00",
+                    "endTime": "09:00:00",
+                    "state": {"code": "IND"},
+                },
+                {
+                    "startTime": "09:00:00",
+                    "endTime": "12:00:00",
+                    "state": {"code": "AS1"},
+                },
+                {
+                    "startTime": "12:00:00",
+                    "endTime": "23:59:59",
+                    "state": {"code": "IND"},
+                },
+            ],
         }
-        requests = helpers.build_status_override_requests(
-            [payload],
+        request = helpers.build_status_override_request(
+            row,
             staff_id="ME",
+            planning_start=helpers.parse_clock("07:00:00"),
             start=datetime(2026, 10, 19, 9, 30, tzinfo=tz),
             end=datetime(2026, 10, 19, 16, 0, tzinfo=tz),
             new_status_code="DI1",
             tz=tz,
         )
-        self.assertEqual(len(requests), 1)
-        periods = requests[0]["staffMember"]["planningPeriods"]
+        periods = request["staffMember"]["planningPeriods"]
         self.assertEqual(
-            [p["state"]["code"] for p in periods],
+            [period["state"]["code"] for period in periods],
             ["IND", "DI1", "AS1", "IND"],
         )
         self.assertEqual(
@@ -265,93 +258,30 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(helpers.cycle_status_code("AS1"), "IND")
         self.assertIsNone(helpers.cycle_status_code("GP"))
 
-    def test_status_override_spans_days_and_preserves_next_change(self) -> None:
+    def test_status_write_rejects_cross_row_range(self) -> None:
         tz = ZoneInfo("Europe/Paris")
-        payload = {
-            "planning": {
-                "fireUnit": {"planningStartTime": "07:00:00"},
-                "staff": [
-                    {
-                        "id": "ME",
-                        "planningId": 1,
-                        "planningStartDate": "2026-10-03",
-                        "priority": 1,
-                        "name": "USER",
-                        "firstName": "TEST",
-                        "planningPeriods": [
-                            {
-                                "startTime": "00:00:00",
-                                "endTime": "23:59:59",
-                                "state": {"code": "AS1"},
-                            }
-                        ],
-                    },
-                    {
-                        "id": "ME",
-                        "planningId": 2,
-                        "planningStartDate": "2026-10-04",
-                        "priority": 1,
-                        "name": "USER",
-                        "firstName": "TEST",
-                        "planningPeriods": [
-                            {
-                                "startTime": "00:00:00",
-                                "endTime": "23:59:59",
-                                "state": {"code": "AS1"},
-                            }
-                        ],
-                    },
-                    {
-                        "id": "ME",
-                        "planningId": 3,
-                        "planningStartDate": "2026-10-05",
-                        "priority": 1,
-                        "name": "USER",
-                        "firstName": "TEST",
-                        "planningPeriods": [
-                            {
-                                "startTime": "00:00:00",
-                                "endTime": "02:00:00",
-                                "state": {"code": "AS1"},
-                            },
-                            {
-                                "startTime": "02:00:00",
-                                "endTime": "23:59:59",
-                                "state": {"code": "IND"},
-                            },
-                        ],
-                    },
-                ],
-            }
+        row = {
+            "id": "ME",
+            "planningId": 1,
+            "planningStartDate": "2026-10-03",
+            "planningPeriods": [
+                {
+                    "startTime": "00:00:00",
+                    "endTime": "23:59:59",
+                    "state": {"code": "AS1"},
+                }
+            ],
         }
-        updates = helpers.build_status_override_requests(
-            [payload],
-            staff_id="ME",
-            start=datetime(2026, 10, 3, 14, 38, tzinfo=tz),
-            end=datetime(2026, 10, 5, 9, 0, tzinfo=tz),
-            new_status_code="DI1",
-            tz=tz,
-        )
-        self.assertEqual(len(updates), 3)
-
-        first = updates[0]["staffMember"]["planningPeriods"]
-        self.assertEqual(first[0]["state"]["code"], "AS1")
-        self.assertEqual(
-            (first[0]["realEndTimeHour"], first[0]["realEndTimeMinute"]),
-            ("14", "38"),
-        )
-        self.assertEqual(first[1]["state"]["code"], "DI1")
-
-        middle = updates[1]["staffMember"]["planningPeriods"]
-        self.assertEqual([item["state"]["code"] for item in middle], ["DI1"])
-
-        last = updates[2]["staffMember"]["planningPeriods"]
-        self.assertEqual(last[0]["state"]["code"], "DI1")
-        self.assertEqual(
-            (last[0]["realEndTimeHour"], last[0]["realEndTimeMinute"]),
-            ("9", "0"),
-        )
-        self.assertEqual(last[1]["state"]["code"], "IND")
+        with self.assertRaisesRegex(ValueError, "one planning row"):
+            helpers.build_status_override_request(
+                row,
+                staff_id="ME",
+                planning_start=helpers.parse_clock("07:00:00"),
+                start=datetime(2026, 10, 3, 14, 38, tzinfo=tz),
+                end=datetime(2026, 10, 5, 9, 0, tzinfo=tz),
+                new_status_code="DI1",
+                tz=tz,
+            )
 
 
 class OperationTests(unittest.TestCase):
