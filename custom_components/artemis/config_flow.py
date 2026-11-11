@@ -9,6 +9,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
 
 from .api import ArtemisApi, ArtemisAuthError, ArtemisConnectionError
@@ -19,10 +20,20 @@ from .const import (
     CONF_CAS_SERVICE,
     CONF_HOST,
     CONF_PASSWORD,
+    CONF_SMARTEMIS_ORGANIZATION,
+    CONF_SMARTEMIS_PHONE_ID,
+    CONF_SMARTEMIS_SERVER,
     CONF_USERNAME,
     DEFAULT_CAS_SERVICE,
     DEFAULT_HOST,
     DOMAIN,
+)
+from .smartemis import (
+    SmartemisApi,
+    SmartemisConnectionError,
+    SmartemisSdis,
+    SmartemisServiceError,
+    select_primary_center,
 )
 
 
@@ -61,6 +72,9 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure one ARTEMIS backend."""
 
     VERSION = 2
+
+    def _smartemis_api(self) -> SmartemisApi:
+        return SmartemisApi(async_get_clientsession(self.hass))
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -119,9 +133,104 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_smartemis(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Do not create a second Smartemis device identity until coexistence is safe."""
+        """Reuse the device identity already registered by the Smartemis app."""
 
-        return self.async_abort(reason="smartemis_registration_paused")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            phone_id = str(user_input[CONF_SMARTEMIS_PHONE_ID]).strip()
+            try:
+                services = await self._smartemis_api().async_discover_sdis(phone_id)
+            except SmartemisConnectionError:
+                errors["base"] = "cannot_connect"
+            except SmartemisServiceError:
+                errors["base"] = "invalid_auth"
+            except Exception:  # noqa: BLE001
+                errors["base"] = "unknown"
+            else:
+                if services:
+                    self._smartemis_phone_id = phone_id
+                    self._smartemis_services = {
+                        service.urls[0]: service
+                        for service in services
+                        if service.urls
+                    }
+                    return await self.async_step_smartemis_service()
+                errors["base"] = "cannot_connect"
+
+        return self.async_show_form(
+            step_id="smartemis",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SMARTEMIS_PHONE_ID): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_smartemis_service(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        phone_id = getattr(self, "_smartemis_phone_id", None)
+        services: dict[str, SmartemisSdis] | None = getattr(
+            self, "_smartemis_services", None
+        )
+        if not phone_id or not services:
+            return self.async_abort(reason="unknown")
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            server = user_input[CONF_SMARTEMIS_SERVER]
+            service = services.get(server)
+            if service is None:
+                errors["base"] = "unknown"
+            else:
+                try:
+                    api = self._smartemis_api()
+                    subscriber = await api.async_get_subscriber(
+                        server, phone_id=phone_id
+                    )
+                    context = await api.async_get_user_context(
+                        server, phone_id=phone_id
+                    )
+                    centers = await api.async_get_centers(
+                        server, phone_id=phone_id
+                    )
+                    primary = select_primary_center(centers, context)
+                except SmartemisConnectionError:
+                    errors["base"] = "cannot_connect"
+                except SmartemisServiceError:
+                    errors["base"] = "invalid_auth"
+                except Exception:  # noqa: BLE001
+                    errors["base"] = "unknown"
+                else:
+                    organization = subscriber.organization or service.name
+                    await self.async_set_unique_id(
+                        f"smartemis:{organization}:{subscriber.person_id}"
+                    )
+                    self._abort_if_unique_id_configured()
+                    return self.async_create_entry(
+                        title=f"Smartemis — {organization} — {primary.name}",
+                        data={
+                            CONF_BACKEND: BACKEND_SMARTEMIS,
+                            CONF_SMARTEMIS_SERVER: server,
+                            CONF_SMARTEMIS_ORGANIZATION: organization,
+                            CONF_SMARTEMIS_PHONE_ID: phone_id,
+                        },
+                    )
+
+        return self.async_show_form(
+            step_id="smartemis_service",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SMARTEMIS_SERVER): vol.In(
+                        {url: service.name for url, service in services.items()}
+                    )
+                }
+            ),
+            errors=errors,
+        )
 
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
@@ -132,7 +241,7 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._reauth_entry is None:
             return self.async_abort(reason="unknown")
         if self._reauth_entry.data.get(CONF_BACKEND, BACKEND_WEBEVO) == BACKEND_SMARTEMIS:
-            return self.async_abort(reason="smartemis_registration_paused")
+            return await self.async_step_reauth_smartemis()
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -167,6 +276,63 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             type=TextSelectorType.PASSWORD,
                             autocomplete="current-password",
                         )
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reauth_smartemis(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Replace only the reused mobile-app identity; never register a new one."""
+
+        errors: dict[str, str] = {}
+        entry: ConfigEntry | None = getattr(self, "_reauth_entry", None)
+        if entry is None:
+            return self.async_abort(reason="unknown")
+
+        if user_input is not None:
+            phone_id = str(user_input[CONF_SMARTEMIS_PHONE_ID]).strip()
+            try:
+                api = self._smartemis_api()
+                subscriber = await api.async_get_subscriber(
+                    entry.data[CONF_SMARTEMIS_SERVER],
+                    phone_id=phone_id,
+                )
+                context = await api.async_get_user_context(
+                    entry.data[CONF_SMARTEMIS_SERVER],
+                    phone_id=phone_id,
+                )
+                centers = await api.async_get_centers(
+                    entry.data[CONF_SMARTEMIS_SERVER],
+                    phone_id=phone_id,
+                )
+                select_primary_center(centers, context)
+            except SmartemisConnectionError:
+                errors["base"] = "cannot_connect"
+            except SmartemisServiceError:
+                errors["base"] = "invalid_auth"
+            except Exception:  # noqa: BLE001
+                errors["base"] = "unknown"
+            else:
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_SMARTEMIS_PHONE_ID: phone_id,
+                        CONF_SMARTEMIS_ORGANIZATION: subscriber.organization,
+                    },
+                )
+                await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
+
+        return self.async_show_form(
+            step_id="reauth_smartemis",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SMARTEMIS_PHONE_ID): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
                     )
                 }
             ),
