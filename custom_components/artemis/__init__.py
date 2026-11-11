@@ -35,12 +35,7 @@ from .coordinator import (
     ArtemisOperationsCoordinator,
     ArtemisPlanningCoordinator,
 )
-from .smartemis import (
-    SmartemisApi,
-    SmartemisConnectionError,
-    SmartemisServiceError,
-    select_primary_center,
-)
+from .smartemis import SmartemisApi, SmartemisConnectionError, SmartemisServiceError
 from .smartemis_coordinator import (
     SmartemisOperationsCoordinator,
     SmartemisPlanningCoordinator,
@@ -136,10 +131,9 @@ async def _async_setup_smartemis(
     phone_id = entry.data[CONF_SMARTEMIS_PHONE_ID]
 
     try:
-        await api.async_get_subscriber(server, phone_id=phone_id)
-        context = await api.async_get_user_context(server, phone_id=phone_id)
-        centers = await api.async_get_centers(server, phone_id=phone_id)
-        primary = select_primary_center(centers, context)
+        _subscriber, context, primary = await api.async_get_identity(
+            server, phone_id=phone_id
+        )
     except SmartemisServiceError as err:
         raise ConfigEntryAuthFailed(str(err)) from err
     except SmartemisConnectionError as err:
@@ -198,12 +192,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Mark pre-0.6 entries explicitly as WebEvo without changing credentials."""
+    """Migrate legacy entries without changing authentication data."""
 
+    if entry.version > 3:
+        return False
+
+    data = dict(entry.data)
     if entry.version == 1:
-        hass.config_entries.async_update_entry(
-            entry,
-            data={**entry.data, CONF_BACKEND: BACKEND_WEBEVO},
-            version=2,
-        )
-    return entry.version <= 2
+        data[CONF_BACKEND] = BACKEND_WEBEVO
+
+    # 0.6.0-0.6.2 stored this redundant Smartemis display value.
+    data.pop("smartemis_organization", None)
+
+    if entry.version < 3 or data != entry.data:
+        hass.config_entries.async_update_entry(entry, data=data, version=3)
+    return True
