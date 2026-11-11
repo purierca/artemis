@@ -138,6 +138,7 @@ async def _async_setup_smartemis(
     phone_id = entry.data[CONF_SMARTEMIS_PHONE_ID]
 
     try:
+        await api.async_get_subscriber(server, phone_id=phone_id)
         context = await api.async_get_user_context(server, phone_id=phone_id)
         centers = await api.async_get_centers(server, phone_id=phone_id)
         primary = select_primary_center(centers, context)
