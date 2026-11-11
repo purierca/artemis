@@ -12,7 +12,7 @@ SMARTEMIS_DIRECTORY_URL = "https://smartemis.artemis-solutions.net/subscription/
 SMARTEMIS_RELEASE_CONTEXT = "2017"
 
 RESULT_OK = 0
-RESULT_AUTHENTICATION_NEEDED = 1
+BOUNDARY_END_OF_PERIOD = "EOP"
 
 RIGHT_INTERVENTIONS = "SMART:FCT:SY:INTV"
 RIGHT_PARAMETERS = "SMART:FCT:PARAM"
@@ -43,6 +43,17 @@ class SmartemisSdis:
 
     name: str
     urls: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SmartemisSubscriber:
+    """An already-registered Smartemis mobile subscriber identity."""
+
+    phone_id: str
+    person_id: str
+    organization: str
+    authority: bool
+    rights: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,15 +164,13 @@ def _decode_response(text: str, expected_method: str) -> dict[int, Any]:
     raise SmartemisConnectionError("Smartemis response has no success payload")
 
 
-def _raise_for_result(
-    result: dict[int, Any], *, allow_auth_needed: bool = False
-) -> int | None:
+def _raise_for_result(result: dict[int, Any]) -> None:
     code = result.get(1)
     number = result.get(2)
     message = result.get(3)
     num = int(number) if isinstance(number, int) else None
-    if num == RESULT_OK or (allow_auth_needed and num == RESULT_AUTHENTICATION_NEEDED):
-        return num
+    if num == RESULT_OK:
+        return
     raise SmartemisServiceError(
         num,
         str(code) if code is not None else None,
@@ -169,13 +178,11 @@ def _raise_for_result(
     )
 
 
-def _ensure_success(
-    response: dict[int, Any], *, allow_auth_needed: bool = False
-) -> int | None:
+def _ensure_success(response: dict[int, Any]) -> None:
     result = response.get(1)
     if not isinstance(result, dict):
         raise SmartemisConnectionError("Smartemis response has no ServiceCallResult")
-    return _raise_for_result(result, allow_auth_needed=allow_auth_needed)
+    _raise_for_result(result)
 
 
 def _status(value: Any) -> dict[str, Any] | None:
@@ -199,6 +206,31 @@ def _normalize_sdis(value: Any) -> SmartemisSdis | None:
     name = str(value.get(1) or "").strip()
     urls = tuple(str(url).strip() for url in (value.get(2) or []) if str(url).strip())
     return SmartemisSdis(name=name, urls=urls) if name and urls else None
+
+
+def _normalize_subscriber(
+    value: Any,
+    rights: Any,
+) -> SmartemisSubscriber | None:
+    if not isinstance(value, dict):
+        return None
+    phone_id = str(value.get(1) or "").strip()
+    person_id = str(value.get(2) or "").strip()
+    organization = str(value.get(3) or "").strip()
+    if not phone_id or not person_id or not organization:
+        return None
+    normalized_rights = tuple(
+        str(item.get(1))
+        for item in (rights or [])
+        if isinstance(item, dict) and item.get(1)
+    )
+    return SmartemisSubscriber(
+        phone_id=phone_id,
+        person_id=person_id,
+        organization=organization,
+        authority=bool(value.get(4)),
+        rights=normalized_rights,
+    )
 
 
 def _normalize_center(value: Any) -> SmartemisCenter | None:
@@ -337,6 +369,49 @@ def _normalize_intervention_detail(response: dict[int, Any]) -> dict[str, Any]:
     }
 
 
+def _update_current_planning_fields(
+    *,
+    phone_id: str,
+    center_id: str,
+    matricule: str,
+    status: dict[str, Any],
+    period_end: str,
+) -> dict[int, dict[str, Any]]:
+    """Build the exact Smartemis EOP status-write request observed in the app."""
+
+    code = str(status.get("code") or "").strip()
+    if not code:
+        raise ValueError("Smartemis status code is required")
+    if not period_end:
+        raise ValueError("Smartemis current period end is required")
+
+    administrative_status: dict[int, dict[str, Any]] = {
+        1: _scalar("str", code),
+    }
+    if status.get("name") is not None:
+        administrative_status[2] = _scalar("str", str(status["name"]))
+    if status.get("rgb") is not None:
+        administrative_status[3] = _scalar("str", str(status["rgb"]))
+    if status.get("order") is not None:
+        administrative_status[4] = _scalar("i32", int(status["order"]))
+
+    schedule_period = _record(
+        {
+            1: _record(administrative_status),
+            3: _record({1: _scalar("str", period_end)}),
+        }
+    )
+    boundary_type = _record({1: _scalar("str", BOUNDARY_END_OF_PERIOD)})
+
+    return {
+        1: _scalar("str", phone_id),
+        2: _scalar("str", center_id),
+        3: schedule_period,
+        4: boundary_type,
+        5: _scalar("str", matricule),
+    }
+
+
 def _center_key(value: str | None) -> str:
     text = str(value or "").strip().upper()
     return str(int(text)) if text.isdigit() else text
@@ -439,47 +514,31 @@ class SmartemisApi:
             if (sdis := _normalize_sdis(raw)) is not None
         )
 
-    async def async_record_subscriber(
+    async def async_get_subscriber(
         self,
         url: str,
         *,
         phone_id: str,
-        person_id: str,
-        mobile: str,
-        organization: str,
-    ) -> bool:
+    ) -> SmartemisSubscriber:
+        """Validate and reuse an identity already registered by the mobile app."""
+
         response = await self._call(
             url,
-            "recordSubscriber",
+            "getSubscriber",
             {
-                1: _scalar("str", mobile),
-                2: _record(
-                    {
-                        1: _scalar("str", phone_id),
-                        2: _scalar("str", person_id),
-                        3: _scalar("str", organization),
-                        4: _scalar("tf", 0),
-                    }
-                ),
+                1: _scalar("str", phone_id),
+                2: _scalar("tf", 1),
                 3: _scalar("tf", 1),
                 4: _scalar("tf", 1),
-                5: _scalar("tf", 1),
             },
         )
-        return (
-            _ensure_success(response, allow_auth_needed=True)
-            == RESULT_AUTHENTICATION_NEEDED
-        )
-
-    async def async_authentify(
-        self, url: str, *, phone_id: str, password: str
-    ) -> None:
-        response = await self._call(
-            url,
-            "authentify",
-            {1: _scalar("str", phone_id), 2: _scalar("str", password)},
-        )
         _ensure_success(response)
+        subscriber = _normalize_subscriber(response.get(2), response.get(4))
+        if subscriber is None or subscriber.phone_id != phone_id:
+            raise SmartemisConnectionError(
+                "Smartemis returned an invalid subscriber identity"
+            )
+        return subscriber
 
     async def async_get_user_context(
         self, url: str, *, phone_id: str
@@ -526,6 +585,38 @@ class SmartemisApi:
                 2: _scalar("str", center_id),
                 3: _scalar("str", matricule),
             },
+        )
+        _ensure_success(response)
+        return _normalize_current_planning(response)
+
+    async def async_update_current_planning(
+        self,
+        url: str,
+        *,
+        phone_id: str,
+        center_id: str,
+        matricule: str,
+        status: dict[str, Any],
+        period_end: str,
+    ) -> dict[str, Any]:
+        """Change current Smartemis status until the current period boundary.
+
+        This mirrors the official app's updateCurrentPlanning request with the
+        safest boundary type, EOP (end of current period). The Home Assistant
+        integration does not expose this write yet; it is kept behind the
+        client API until a live write/read-back validation has been completed.
+        """
+
+        response = await self._call(
+            url,
+            "updateCurrentPlanning",
+            _update_current_planning_fields(
+                phone_id=phone_id,
+                center_id=center_id,
+                matricule=matricule,
+                status=status,
+                period_end=period_end,
+            ),
         )
         _ensure_success(response)
         return _normalize_current_planning(response)
