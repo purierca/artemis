@@ -14,9 +14,9 @@ SMARTEMIS_RELEASE_CONTEXT = "2017"
 RESULT_OK = 0
 BOUNDARY_END_OF_PERIOD = "EOP"
 
-RIGHT_INTERVENTIONS = "SMART:FCT:SY:INTV"
 RIGHT_PARAMETERS = "SMART:FCT:PARAM"
 YES = "O"
+THRIFT_NULL = "null"
 
 
 class SmartemisError(Exception):
@@ -52,8 +52,6 @@ class SmartemisSubscriber:
     phone_id: str
     person_id: str
     organization: str
-    authority: bool
-    rights: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,7 +190,6 @@ def _status(value: Any) -> dict[str, Any] | None:
         "code": value.get(1),
         "name": value.get(2),
         "rgb": value.get(3),
-        "order": value.get(4),
     }
 
 
@@ -208,10 +205,7 @@ def _normalize_sdis(value: Any) -> SmartemisSdis | None:
     return SmartemisSdis(name=name, urls=urls) if name and urls else None
 
 
-def _normalize_subscriber(
-    value: Any,
-    rights: Any,
-) -> SmartemisSubscriber | None:
+def _normalize_subscriber(value: Any) -> SmartemisSubscriber | None:
     if not isinstance(value, dict):
         return None
     phone_id = str(value.get(1) or "").strip()
@@ -219,17 +213,10 @@ def _normalize_subscriber(
     organization = str(value.get(3) or "").strip()
     if not phone_id or not person_id or not organization:
         return None
-    normalized_rights = tuple(
-        str(item.get(1))
-        for item in (rights or [])
-        if isinstance(item, dict) and item.get(1)
-    )
     return SmartemisSubscriber(
         phone_id=phone_id,
         person_id=person_id,
         organization=organization,
-        authority=bool(value.get(4)),
-        rights=normalized_rights,
     )
 
 
@@ -295,17 +282,11 @@ def _normalize_period(value: Any) -> dict[str, Any] | None:
 def _normalize_current_planning(response: dict[int, Any]) -> dict[str, Any]:
     available = response.get(6)
     return {
-        "server_time": _artemis_date(response.get(2)),
         "current_period": _normalize_period(response.get(3)),
         "periods": tuple(
             period
             for raw in (response.get(4) or [])
             if (period := _normalize_period(raw)) is not None
-        ),
-        "allowed_statuses": tuple(
-            status
-            for raw in (response.get(5) or [])
-            if (status := _status(raw)) is not None
         ),
         "available_personnel": (
             available.get(1) if isinstance(available, dict) else None
@@ -325,33 +306,19 @@ def _normalize_intervention(value: dict[int, Any]) -> dict[str, Any]:
 
 def _normalize_intervention_detail(response: dict[int, Any]) -> dict[str, Any]:
     detail = response.get(2) if isinstance(response.get(2), dict) else {}
-    vehicles: list[dict[str, Any]] = []
-    units = []
-
-    for unit in detail.get(1) or []:
-        if not isinstance(unit, dict):
-            continue
-        unit_vehicles = []
-        for vehicle in unit.get(5) or []:
-            if not isinstance(vehicle, dict):
-                continue
-            normalized = {
-                "id": vehicle.get(3),
-                "name": vehicle.get(4),
-                "state_code": vehicle.get(5),
-                "center_id": unit.get(3),
-                "center_name": unit.get(4),
-            }
-            unit_vehicles.append(normalized)
-            vehicles.append(normalized)
-        units.append(
-            {
-                "id": unit.get(3),
-                "name": unit.get(4),
-                "vehicles": tuple(unit_vehicles),
-            }
-        )
-
+    vehicles = tuple(
+        {
+            "id": vehicle.get(3),
+            "name": vehicle.get(4),
+            "state_code": vehicle.get(5),
+            "center_id": unit.get(3),
+            "center_name": unit.get(4),
+        }
+        for unit in (detail.get(1) or [])
+        if isinstance(unit, dict)
+        for vehicle in (unit.get(5) or [])
+        if isinstance(vehicle, dict)
+    )
     addresses = tuple(
         {
             "type": address.get(1),
@@ -362,11 +329,7 @@ def _normalize_intervention_detail(response: dict[int, Any]) -> dict[str, Any]:
         for address in (detail.get(3) or [])
         if isinstance(address, dict)
     )
-    return {
-        "units": tuple(units),
-        "vehicles": tuple(vehicles),
-        "addresses": addresses,
-    }
+    return {"vehicles": vehicles, "addresses": addresses}
 
 
 def _update_current_planning_fields(
@@ -472,10 +435,6 @@ class SmartemisApi:
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._verify_ssl = verify_ssl
 
-    @property
-    def verify_ssl(self) -> bool:
-        return self._verify_ssl
-
     async def _call(
         self,
         url: str,
@@ -533,12 +492,25 @@ class SmartemisApi:
             },
         )
         _ensure_success(response)
-        subscriber = _normalize_subscriber(response.get(2), response.get(4))
+        subscriber = _normalize_subscriber(response.get(2))
         if subscriber is None or subscriber.phone_id != phone_id:
             raise SmartemisConnectionError(
                 "Smartemis returned an invalid subscriber identity"
             )
         return subscriber
+
+    async def async_get_identity(
+        self,
+        url: str,
+        *,
+        phone_id: str,
+    ) -> tuple[SmartemisSubscriber, SmartemisUserContext, SmartemisCenter]:
+        """Resolve the existing subscriber identity and affiliated centre."""
+
+        subscriber = await self.async_get_subscriber(url, phone_id=phone_id)
+        context = await self.async_get_user_context(url, phone_id=phone_id)
+        centers = await self.async_get_centers(url, phone_id=phone_id)
+        return subscriber, context, select_primary_center(centers, context)
 
     async def async_get_user_context(
         self, url: str, *, phone_id: str
@@ -635,9 +607,9 @@ class SmartemisApi:
             "getSyItv",
             {
                 1: _scalar("str", phone_id),
-                2: _scalar("str", center_id or "null"),
-                3: _scalar("str", matricule or "null"),
-                4: _scalar("str", display_level or "null"),
+                2: _scalar("str", center_id or THRIFT_NULL),
+                3: _scalar("str", matricule or THRIFT_NULL),
+                4: _scalar("str", display_level or THRIFT_NULL),
             },
         )
         _ensure_success(response)
