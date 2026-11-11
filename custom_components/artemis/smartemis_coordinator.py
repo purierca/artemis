@@ -1,4 +1,4 @@
-"""Home Assistant coordinators for the read-only Smartemis backend."""
+"""Home Assistant coordinators for the Smartemis backend."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def _status_value(value: Any) -> StatusValue | None:
 
 
 class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
-    """Expose the subscriber's current Smartemis planning without writes."""
+    """Expose and safely update the subscriber's current Smartemis planning."""
 
     def __init__(
         self,
