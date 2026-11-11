@@ -30,13 +30,11 @@ class PlanningSnapshot:
 
     current: StatusValue | None
     current_since: datetime | None
-    current_period_end: datetime | None
     next_status: StatusValue | None
     next_change: datetime | None
     staff_name: str
     staff_id: str
     unit_id: str
-    lookahead_weeks: int
     available_personnel: int | None = None
     personnel_in_operation: int | None = None
 
@@ -47,7 +45,6 @@ class CenterAvailabilitySnapshot:
 
     available: int
     in_operation: int
-    unit_id: str
 
 
 @dataclass(slots=True, frozen=True)
