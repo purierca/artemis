@@ -57,7 +57,6 @@ class PlanningTests(unittest.TestCase):
             staff_name="TEST USER",
             staff_id="1",
             unit_id="TEST",
-            lookahead_weeks=1,
         )
         self.assertEqual(snap.current.code, "IND")
         self.assertEqual(snap.next_status.code, "DI1")
@@ -90,11 +89,10 @@ class PlanningTests(unittest.TestCase):
             staff_name="TEST USER",
             staff_id="1",
             unit_id="TEST",
-            lookahead_weeks=1,
         )
         self.assertEqual(snap.next_change, datetime(2026, 10, 1, 7, 0, tzinfo=tz))
 
-    def test_current_period_end_is_available_without_future_status_change(self) -> None:
+    def test_no_future_different_status_has_no_next_change(self) -> None:
         tz = ZoneInfo("Europe/Paris")
         status_ind = models.StatusValue("IND", "INDISPONIBLE")
         intervals = [
@@ -115,15 +113,10 @@ class PlanningTests(unittest.TestCase):
             staff_name="TEST USER",
             staff_id="1",
             unit_id="TEST",
-            lookahead_weeks=1,
         )
         self.assertEqual(snap.current.code, "IND")
         self.assertIsNone(snap.next_change)
         self.assertIsNone(snap.next_status)
-        self.assertEqual(
-            snap.current_period_end,
-            datetime(2026, 10, 7, 7, 0, tzinfo=tz),
-        )
 
     def test_status_override_boundary_stops_at_next_handover(self) -> None:
         tz = ZoneInfo("Europe/Paris")
@@ -359,7 +352,6 @@ class PlanningTests(unittest.TestCase):
             ("9", "0"),
         )
         self.assertEqual(last[1]["state"]["code"], "IND")
-
 
 
 class OperationTests(unittest.TestCase):
