@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from html.parser import HTMLParser
 import re
+from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urljoin
 
@@ -174,7 +174,7 @@ class ArtemisApi:
 
             except ArtemisError:
                 raise
-            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            except (aiohttp.ClientError, TimeoutError) as err:
                 raise ArtemisConnectionError(str(err)) from err
 
     async def _direct_json(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -194,7 +194,7 @@ class ArtemisApi:
                 return await response.json(content_type=None)
         except ArtemisError:
             raise
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
             raise ArtemisConnectionError(str(err)) from err
 
     async def _request_json(
@@ -248,7 +248,7 @@ class ArtemisApi:
 
         except ArtemisError:
             raise
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
             raise ArtemisConnectionError(str(err)) from err
 
     async def async_person_init(self) -> dict[str, Any]:
