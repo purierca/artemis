@@ -20,7 +20,6 @@ from .const import (
     CONF_CAS_SERVICE,
     CONF_HOST,
     CONF_PASSWORD,
-    CONF_SMARTEMIS_ORGANIZATION,
     CONF_SMARTEMIS_PHONE_ID,
     CONF_SMARTEMIS_SERVER,
     CONF_USERNAME,
@@ -33,7 +32,6 @@ from .smartemis import (
     SmartemisConnectionError,
     SmartemisSdis,
     SmartemisServiceError,
-    select_primary_center,
 )
 
 
@@ -71,7 +69,7 @@ async def _validate_webevo(data: dict[str, Any]) -> dict[str, str]:
 class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure one ARTEMIS backend."""
 
-    VERSION = 2
+    VERSION = 3
 
     def _smartemis_api(self) -> SmartemisApi:
         return SmartemisApi(async_get_clientsession(self.hass))
@@ -187,17 +185,11 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 try:
-                    api = self._smartemis_api()
-                    subscriber = await api.async_get_subscriber(
-                        server, phone_id=phone_id
+                    subscriber, _context, primary = (
+                        await self._smartemis_api().async_get_identity(
+                            server, phone_id=phone_id
+                        )
                     )
-                    context = await api.async_get_user_context(
-                        server, phone_id=phone_id
-                    )
-                    centers = await api.async_get_centers(
-                        server, phone_id=phone_id
-                    )
-                    primary = select_primary_center(centers, context)
                 except SmartemisConnectionError:
                     errors["base"] = "cannot_connect"
                 except SmartemisServiceError:
@@ -205,17 +197,17 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 except Exception:  # noqa: BLE001
                     errors["base"] = "unknown"
                 else:
-                    organization = subscriber.organization or service.name
                     await self.async_set_unique_id(
-                        f"smartemis:{organization}:{subscriber.person_id}"
+                        f"smartemis:{subscriber.organization}:{subscriber.person_id}"
                     )
                     self._abort_if_unique_id_configured()
                     return self.async_create_entry(
-                        title=f"Smartemis — {organization} — {primary.name}",
+                        title=(
+                            f"Smartemis — {subscriber.organization} — {primary.name}"
+                        ),
                         data={
                             CONF_BACKEND: BACKEND_SMARTEMIS,
                             CONF_SMARTEMIS_SERVER: server,
-                            CONF_SMARTEMIS_ORGANIZATION: organization,
                             CONF_SMARTEMIS_PHONE_ID: phone_id,
                         },
                     )
@@ -233,7 +225,7 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reauth(
-        self, entry_data: dict[str, Any]
+        self, _entry_data: dict[str, Any]
     ) -> ConfigFlowResult:
         self._reauth_entry = self.hass.config_entries.async_get_entry(
             self.context["entry_id"]
@@ -295,20 +287,10 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             phone_id = str(user_input[CONF_SMARTEMIS_PHONE_ID]).strip()
             try:
-                api = self._smartemis_api()
-                subscriber = await api.async_get_subscriber(
+                await self._smartemis_api().async_get_identity(
                     entry.data[CONF_SMARTEMIS_SERVER],
                     phone_id=phone_id,
                 )
-                context = await api.async_get_user_context(
-                    entry.data[CONF_SMARTEMIS_SERVER],
-                    phone_id=phone_id,
-                )
-                centers = await api.async_get_centers(
-                    entry.data[CONF_SMARTEMIS_SERVER],
-                    phone_id=phone_id,
-                )
-                select_primary_center(centers, context)
             except SmartemisConnectionError:
                 errors["base"] = "cannot_connect"
             except SmartemisServiceError:
@@ -318,11 +300,7 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 self.hass.config_entries.async_update_entry(
                     entry,
-                    data={
-                        **entry.data,
-                        CONF_SMARTEMIS_PHONE_ID: phone_id,
-                        CONF_SMARTEMIS_ORGANIZATION: subscriber.organization,
-                    },
+                    data={**entry.data, CONF_SMARTEMIS_PHONE_ID: phone_id},
                 )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
