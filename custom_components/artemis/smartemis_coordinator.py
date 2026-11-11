@@ -52,8 +52,6 @@ def _status_value(value: Any) -> StatusValue | None:
 class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
     """Expose the subscriber's current Smartemis planning without writes."""
 
-    read_only = True
-
     def __init__(
         self,
         hass: HomeAssistant,
@@ -79,14 +77,6 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         self.staff_id = center.person_id or center.matricule
         self.staff_name = center.person_name
         self._tz = ZoneInfo(hass.config.time_zone)
-
-    @property
-    def effective_next_change(self) -> datetime | None:
-        return self.data.next_change if self.data else None
-
-    @property
-    def effective_next_status(self) -> StatusValue | None:
-        return self.data.next_status if self.data else None
 
     async def _async_update_data(self) -> PlanningSnapshot:
         try:
@@ -207,8 +197,12 @@ class SmartemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
                         matricule=self.center.matricule,
                         intervention_id=intervention_id,
                     )
-                except (SmartemisConnectionError, SmartemisServiceError):
-                    pass
+                except (SmartemisConnectionError, SmartemisServiceError) as err:
+                    _LOGGER.debug(
+                        "Could not fetch Smartemis intervention %s detail: %s",
+                        intervention_id,
+                        err,
+                    )
 
             operations.append(_operation_snapshot(summary, detail))
 
