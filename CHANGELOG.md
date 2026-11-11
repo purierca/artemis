@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented here.
 
+## 0.6.3
+
+### Added
+
+- Restore Smartemis setup by reusing the exact `phoneId` already registered by the official mobile app.
+- Validate that identity with Smartemis `getSubscriber`; Home Assistant no longer creates or registers a second Smartemis device.
+- Add the exact Smartemis `updateCurrentPlanning` / `EOP` protocol used by the official app and cover it with request-shape and client-response tests.
+
+### Safety
+
+- Remove `recordSubscriber` and additional-authentication calls from the Home Assistant Smartemis setup path, eliminating the registration behaviour that could invalidate the official app session.
+- Keep Smartemis status writes internal/not exposed in Home Assistant until a controlled live write and read-back has been validated on a real account.
+- Treat the reused Smartemis `phoneId` as a credential.
+- ARTEMIS WebEvo remains unchanged.
+
 ## 0.6.2
 
 ### Fixed
