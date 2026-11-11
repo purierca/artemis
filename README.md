@@ -7,7 +7,7 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo** and the **Sm
 
 ## What it does
 
-Version **0.6.0** keeps the Home Assistant surface deliberately small:
+Version **0.6.2** keeps the Home Assistant surface deliberately small:
 
 | Entity | WebEvo | Smartemis | Purpose |
 | --- | --- | --- | --- |
@@ -38,7 +38,7 @@ The registration step is the part currently paused: testing showed that a newly 
 
 The employee identifier, phone number and additional authentication code are **not stored** in the Home Assistant config entry. Home Assistant keeps the generated Smartemis device identity plus the selected service/server.
 
-The backend has been validated against the **Service de sécurité incendie de Montréal (SIM)**, including global active interventions, engaged stations/vehicles, vehicle states, addresses and GPS.
+The backend has been validated against the **Service de sécurité incendie de Montréal (SIM)**, including global active interventions, engaged stations/vehicles, vehicle states, addresses and GPS. Smartemis' `default_cs` setting is treated only as the app's default displayed station; personal planning uses the actual affiliated station exposed by the subscriber profile.
 
 ## Polling architecture
 
