@@ -28,7 +28,7 @@ from .const import (
 )
 from .helpers import (
     build_planning_snapshot,
-    build_status_override_requests,
+    build_status_override_request,
     cycle_status_code,
     next_shift_boundary,
     next_staff_row_status_change,
@@ -282,21 +282,13 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                     "ARTEMIS did not expose a safe planning boundary"
                 )
 
-            # Build the save from the exact row just re-read from WebEvo. Never
-            # submit cached future rows: all periods outside [start, boundary)
-            # in this row are copied back unchanged.
-            fresh_payload = {
-                "planning": {
-                    "fireUnit": {
-                        "planningStartTime": self._planning_start.isoformat()
-                    },
-                    "staff": [fresh_row],
-                }
-            }
+            # Build exactly one save payload from the exact row just re-read.
+            # Every period outside [start, boundary) is copied back unchanged.
             try:
-                requests = build_status_override_requests(
-                    [fresh_payload],
+                request = build_status_override_request(
+                    fresh_row,
                     staff_id=self.staff_id,
+                    planning_start=self._planning_start,
                     start=start,
                     end=boundary,
                     new_status_code=target_code,
@@ -304,11 +296,6 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                 )
             except ValueError as err:
                 raise HomeAssistantError(str(err)) from err
-
-            if len(requests) != 1:
-                raise HomeAssistantError(
-                    "ARTEMIS status write was aborted because it did not resolve to exactly one current planning row"
-                )
 
             new_override = not had_override
             if new_override:
@@ -318,7 +305,7 @@ class ArtemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                 await self._set_override(boundary, planned_next)
 
             try:
-                await self.api.async_save_staff(requests[0])
+                await self.api.async_save_staff(request)
             except (
                 ArtemisAuthError,
                 ArtemisConnectionError,
