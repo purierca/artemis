@@ -12,6 +12,9 @@ import aiohttp
 
 from .const import DEFAULT_CAS_SERVICE
 
+_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=20)
+_LOGIN_TIMEOUT = aiohttp.ClientTimeout(total=25)
+
 
 class ArtemisError(Exception):
     """Base ARTEMIS error."""
@@ -64,12 +67,6 @@ class ArtemisApi:
         self._login_lock = asyncio.Lock()
         self._logged_in = False
         self.unit_id: str | None = None
-        self.profile_id: str | None = None
-        self.sso_name: str | None = None
-
-    @property
-    def base_url(self) -> str:
-        return self._base_url
 
     def _url(self, path: str) -> str:
         return urljoin(self._base_url + "/", path.lstrip("/"))
@@ -94,7 +91,7 @@ class ArtemisApi:
                     self._url("/cas/login"),
                     params={"service": self._cas_service},
                     allow_redirects=True,
-                    timeout=aiohttp.ClientTimeout(total=20),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as response:
                     login_page = await self._read_text(response)
                     if response.status >= 400:
@@ -114,7 +111,7 @@ class ArtemisApi:
                         "lt": parser.lt,
                     },
                     allow_redirects=True,
-                    timeout=aiohttp.ClientTimeout(total=25),
+                    timeout=_LOGIN_TIMEOUT,
                 ) as response:
                     web_login_page = await self._read_text(response)
                     if response.status >= 400:
@@ -161,7 +158,7 @@ class ArtemisApi:
                         "pwd": sso_sha1,
                     },
                     allow_redirects=True,
-                    timeout=aiohttp.ClientTimeout(total=20),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as response:
                     final_text = await self._read_text(response)
                     if response.status >= 400:
@@ -172,9 +169,7 @@ class ArtemisApi:
                         if "Connexion Artemis WebEvo" in final_text:
                             raise ArtemisAuthError("ARTEMIS WebEvo rejected the login")
 
-                self.sso_name = sso_name
                 self.unit_id = unit_id
-                self.profile_id = profile_id
                 self._logged_in = True
 
             except ArtemisError:
@@ -189,7 +184,7 @@ class ArtemisApi:
                 method,
                 self._url(path),
                 allow_redirects=False,
-                timeout=aiohttp.ClientTimeout(total=20),
+                timeout=_REQUEST_TIMEOUT,
                 **kwargs,
             ) as response:
                 if response.status in {401, 403}:
@@ -219,7 +214,7 @@ class ArtemisApi:
                 method,
                 self._url(path),
                 allow_redirects=False,
-                timeout=aiohttp.ClientTimeout(total=20),
+                timeout=_REQUEST_TIMEOUT,
                 **kwargs,
             ) as response:
                 is_auth_redirect = response.status in {301, 302, 303, 307, 308}
@@ -284,7 +279,6 @@ class ArtemisApi:
         if not isinstance(data, dict):
             raise ArtemisConnectionError("Unexpected personPlanning/getPlanning response")
         return data
-
 
     async def async_get_staff(
         self,
