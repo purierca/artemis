@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import SMARTEMIS_UPDATE_INTERVAL
@@ -79,7 +79,6 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         self.staff_id = center.person_id or center.matricule
         self.staff_name = center.person_name
         self._tz = ZoneInfo(hass.config.time_zone)
-        self._available_status_codes: set[str] = set()
 
     @property
     def effective_next_change(self) -> datetime | None:
@@ -88,23 +87,6 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
     @property
     def effective_next_status(self) -> StatusValue | None:
         return self.data.next_status if self.data else None
-
-    @property
-    def effective_override_boundary(self) -> None:
-        return None
-
-    @property
-    def status_override_active(self) -> bool:
-        return False
-
-    def is_status_code_available(self, code: str) -> bool:
-        return not self._available_status_codes or code in self._available_status_codes
-
-    async def async_cycle_status(self) -> str:
-        raise HomeAssistantError("Smartemis status changes are read-only in this release")
-
-    def async_shutdown_artemis(self) -> None:
-        """Match the WebEvo coordinator lifecycle interface."""
 
     async def _async_update_data(self) -> PlanningSnapshot:
         try:
@@ -130,7 +112,6 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
 
         now = datetime.now(self._tz)
         current_since = _parse_datetime(current_period.get("start"), self._tz)
-        current_end = _parse_datetime(current_period.get("end"), self._tz)
 
         next_change = None
         next_status = None
@@ -146,12 +127,6 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
                 next_status = status
                 break
 
-        self._available_status_codes = {
-            status.code
-            for item in (payload.get("allowed_statuses") or ())
-            if (status := _status_value(item)) is not None
-        }
-
         available = payload.get("available_personnel")
         try:
             available_personnel = int(available) if available is not None else None
@@ -161,13 +136,11 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         return PlanningSnapshot(
             current=current,
             current_since=current_since,
-            current_period_end=current_end,
             next_status=next_status,
             next_change=next_change,
             staff_name=self.staff_name,
             staff_id=self.staff_id,
             unit_id=self.unit_id,
-            lookahead_weeks=0,
             available_personnel=available_personnel,
         )
 
