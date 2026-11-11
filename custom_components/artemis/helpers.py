@@ -4,10 +4,31 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 from typing import Any, Iterable
+from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
 from .const import STATUS_CYCLE
 from .models import PlanningInterval, PlanningSnapshot, StatusValue
+
+_LATITUDE_KEYS = (
+    "latitude",
+    "lat",
+    "gpsLatitude",
+    "latitudeGps",
+    "latitudeWgs84",
+    "latWgs84",
+)
+_LONGITUDE_KEYS = (
+    "longitude",
+    "lon",
+    "lng",
+    "gpsLongitude",
+    "longitudeGps",
+    "longitudeWgs84",
+    "lonWgs84",
+    "lngWgs84",
+)
+_UNIT_LABEL_KEYS = ("shortname", "shortName", "code", "name", "id")
 
 
 def parse_hms(value: str | None) -> timedelta:
@@ -206,7 +227,6 @@ def build_planning_snapshot(
     staff_name: str,
     staff_id: str,
     unit_id: str,
-    lookahead_weeks: int,
 ) -> PlanningSnapshot:
     """Build current status and next real status change."""
     current_index: int | None = None
@@ -219,13 +239,11 @@ def build_planning_snapshot(
         return PlanningSnapshot(
             current=None,
             current_since=None,
-            current_period_end=None,
             next_status=None,
             next_change=None,
             staff_name=staff_name,
             staff_id=staff_id,
             unit_id=unit_id,
-            lookahead_weeks=lookahead_weeks,
         )
 
     current_interval = intervals[current_index]
@@ -256,31 +274,15 @@ def build_planning_snapshot(
         next_change = interval.start
         break
 
-    # ARTEMIS/WebEvo commonly splits a continuous status at row/day boundaries.
-    # Extend the current-period end through adjacent same-status intervals so a
-    # manual override can remain useful even when there is no future *different*
-    # status in the look-ahead window.
-    current_period_end = current_interval.end
-    for interval in intervals[current_index + 1 :]:
-        if interval.status.code != current.code:
-            break
-        if interval.start > current_period_end + timedelta(seconds=1):
-            break
-        if interval.end > current_period_end:
-            current_period_end = interval.end
-
     return PlanningSnapshot(
         current=current,
         current_since=current_since,
-        current_period_end=current_period_end,
         next_status=next_status,
         next_change=next_change,
         staff_name=staff_name,
         staff_id=staff_id,
         unit_id=unit_id,
-        lookahead_weeks=lookahead_weeks,
     )
-
 
 
 def cycle_status_code(current_code: str) -> str | None:
@@ -447,7 +449,7 @@ def build_status_override_requests(
     requests.sort(key=lambda item: item[0])
     return [request for _day, request in requests]
 
-def format_address(address: dict[str, Any] | None, *, with_city: bool = True) -> str:
+def format_address(address: dict[str, Any] | None) -> str:
     """Match the address composition used by ARTEMIS WebEvo."""
     if not address:
         return ""
@@ -455,7 +457,7 @@ def format_address(address: dict[str, Any] | None, *, with_city: bool = True) ->
     chunks: list[str] = []
     if address.get("type") and address.get("type") != "IT":
         chunks.append("CRM")
-    if with_city and address.get("city"):
+    if address.get("city"):
         chunks.append(str(address["city"]))
     for key in ("line1", "line2", "etareName", "knownPoint"):
         if address.get(key):
@@ -488,13 +490,16 @@ def format_address(address: dict[str, Any] | None, *, with_city: bool = True) ->
 def operation_addresses(operation: dict[str, Any]) -> list[str]:
     """Return unique formatted addresses for an operation."""
     addresses: list[str] = []
+    seen: set[str] = set()
     raw_addresses = operation.get("addresses") or []
     if isinstance(raw_addresses, list):
         for item in raw_addresses:
-            if isinstance(item, dict):
-                formatted = format_address(item)
-                if formatted and formatted not in addresses:
-                    addresses.append(formatted)
+            if not isinstance(item, dict):
+                continue
+            formatted = format_address(item)
+            if formatted and formatted not in seen:
+                seen.add(formatted)
+                addresses.append(formatted)
 
     if not addresses and isinstance(operation.get("address"), dict):
         formatted = format_address(operation["address"])
@@ -502,7 +507,6 @@ def operation_addresses(operation: dict[str, Any]) -> list[str]:
             addresses.append(formatted)
 
     return addresses
-
 
 
 def coerce_coordinate(value: Any, *, latitude: bool) -> float | None:
@@ -525,92 +529,69 @@ def coerce_coordinate(value: Any, *, latitude: bool) -> float | None:
     return None
 
 
-def operation_coordinates(operation: dict[str, Any]) -> tuple[float | None, float | None, str]:
-    """Extract the first WGS84 latitude/longitude pair exposed by ARTEMIS.
-
-    The live-operation schema is not identical across all WebEvo deployments,
-    so this supports common field names while avoiding ambiguous projected
-    ``x``/``y`` values. The returned source is informational only.
-    """
-    latitude_keys = (
-        "latitude",
-        "lat",
-        "gpsLatitude",
-        "latitudeGps",
-        "latitudeWgs84",
-        "latWgs84",
-    )
-    longitude_keys = (
-        "longitude",
-        "lon",
-        "lng",
-        "gpsLongitude",
-        "longitudeGps",
-        "longitudeWgs84",
-        "lonWgs84",
-        "lngWgs84",
-    )
+def operation_coordinates(
+    operation: dict[str, Any],
+) -> tuple[float | None, float | None]:
+    """Extract the first plausible WGS84 latitude/longitude pair."""
 
     def pair_from_dict(value: dict[str, Any]) -> tuple[float | None, float | None]:
         lower = {str(key).lower(): item for key, item in value.items()}
-        lat = next(
+        latitude = next(
             (
                 coerce_coordinate(lower.get(key.lower()), latitude=True)
-                for key in latitude_keys
+                for key in _LATITUDE_KEYS
                 if key.lower() in lower
             ),
             None,
         )
-        lon = next(
+        longitude = next(
             (
                 coerce_coordinate(lower.get(key.lower()), latitude=False)
-                for key in longitude_keys
+                for key in _LONGITUDE_KEYS
                 if key.lower() in lower
             ),
             None,
         )
-        if lat is not None and lon is not None:
-            return lat, lon
+        if latitude is not None and longitude is not None:
+            return latitude, longitude
 
-        # GeoJSON Point: coordinates are [longitude, latitude].
         coordinates = value.get("coordinates")
-        point_type = str(value.get("type") or "").lower()
-        if point_type == "point" and isinstance(coordinates, (list, tuple)) and len(coordinates) >= 2:
-            lon = coerce_coordinate(coordinates[0], latitude=False)
-            lat = coerce_coordinate(coordinates[1], latitude=True)
-            if lat is not None and lon is not None:
-                return lat, lon
+        if (
+            str(value.get("type") or "").lower() == "point"
+            and isinstance(coordinates, (list, tuple))
+            and len(coordinates) >= 2
+        ):
+            longitude = coerce_coordinate(coordinates[0], latitude=False)
+            latitude = coerce_coordinate(coordinates[1], latitude=True)
+            if latitude is not None and longitude is not None:
+                return latitude, longitude
 
         return None, None
 
-    candidates: list[tuple[str, Any]] = [("operation", operation)]
-    if isinstance(operation.get("address"), dict):
-        candidates.append(("address", operation["address"]))
+    candidates: list[dict[str, Any]] = [operation]
+    address = operation.get("address")
+    if isinstance(address, dict):
+        candidates.append(address)
+
     raw_addresses = operation.get("addresses") or []
     if isinstance(raw_addresses, list):
-        candidates.extend(
-            (f"addresses[{index}]", item)
-            for index, item in enumerate(raw_addresses)
-            if isinstance(item, dict)
-        )
+        candidates.extend(item for item in raw_addresses if isinstance(item, dict))
 
-    # Some deployments wrap coordinates in one of these objects.
     for container_name in ("location", "position", "gps", "geometry", "coordinate"):
         value = operation.get(container_name)
         if isinstance(value, dict):
-            candidates.append((container_name, value))
-        address = operation.get("address")
-        if isinstance(address, dict) and isinstance(address.get(container_name), dict):
-            candidates.append((f"address.{container_name}", address[container_name]))
+            candidates.append(value)
+        if isinstance(address, dict):
+            nested = address.get(container_name)
+            if isinstance(nested, dict):
+                candidates.append(nested)
 
-    for source, candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        lat, lon = pair_from_dict(candidate)
-        if lat is not None and lon is not None:
-            return lat, lon, source
+    for candidate in candidates:
+        latitude, longitude = pair_from_dict(candidate)
+        if latitude is not None and longitude is not None:
+            return latitude, longitude
 
-    return None, None, ""
+    return None, None
 
 
 def navigation_uri(
@@ -619,8 +600,6 @@ def navigation_uri(
     address: str = "",
 ) -> str:
     """Return an app-agnostic Android map deep link."""
-    from urllib.parse import quote_plus
-
     if latitude is not None and longitude is not None:
         coordinate = f"{latitude:.6f},{longitude:.6f}"
         return f"deep-link://geo:0,0?q={quote_plus(coordinate)}"
@@ -628,11 +607,6 @@ def navigation_uri(
         return f"deep-link://geo:0,0?q={quote_plus(address)}"
     return ""
 
-
-def operation_navigation_uri(operation: dict[str, Any], address: str = "") -> str:
-    """Return a navigation URI from a WebEvo operation."""
-    latitude, longitude, _source = operation_coordinates(operation)
-    return navigation_uri(latitude, longitude, address)
 
 def _state_parts(item: dict[str, Any]) -> tuple[str, str]:
     """Return state code and name from a WebEvo object."""
@@ -649,7 +623,7 @@ def _state_parts(item: dict[str, Any]) -> tuple[str, str]:
 def _unit_label(unit: Any) -> str:
     """Return the best centre/unit label exposed by ARTEMIS."""
     if isinstance(unit, dict):
-        for key in ("shortname", "shortName", "code", "name", "id"):
+        for key in _UNIT_LABEL_KEYS:
             value = unit.get(key)
             if value not in (None, ""):
                 return str(value).strip()
@@ -685,7 +659,7 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
     title = str(operation.get("disasterLabel") or "Intervention").strip()
     addresses = operation_addresses(operation)
     address = addresses[0] if addresses else "Adresse non communiquee"
-    latitude, longitude, _source = operation_coordinates(operation)
+    latitude, longitude = operation_coordinates(operation)
     state_code, state_name = _state_parts(operation)
 
     # Build a lookup so vehicle owner ids can be rendered as the human-readable
@@ -695,7 +669,7 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(unit, dict):
             continue
         label = _unit_label(unit)
-        for key in ("id", "code", "name", "shortname", "shortName"):
+        for key in _UNIT_LABEL_KEYS:
             value = unit.get(key)
             if value not in (None, "") and label:
                 unit_labels[str(value)] = label
@@ -710,7 +684,7 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
         if center in unit_labels:
             center = unit_labels[center]
         elif isinstance(owner, dict):
-            for key in ("id", "code", "name", "shortname", "shortName"):
+            for key in _UNIT_LABEL_KEYS:
                 value = owner.get(key)
                 if value not in (None, "") and str(value) in unit_labels:
                     center = unit_labels[str(value)]
@@ -747,7 +721,7 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
         "address": address,
         "latitude": latitude,
         "longitude": longitude,
-        "navigation_uri": operation_navigation_uri(operation, address),
+        "navigation_uri": navigation_uri(latitude, longitude, address),
         "state_code": state_code,
         "state_name": state_name,
         "vehicles": vehicles,
