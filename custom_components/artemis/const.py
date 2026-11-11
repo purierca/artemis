@@ -18,9 +18,6 @@ CONF_PASSWORD = "password"
 CONF_SMARTEMIS_SERVER = "smartemis_server"
 CONF_SMARTEMIS_ORGANIZATION = "smartemis_organization"
 CONF_SMARTEMIS_PHONE_ID = "smartemis_phone_id"
-CONF_PERSON_ID = "person_id"
-CONF_MOBILE = "mobile"
-
 DEFAULT_HOST = "https://artemisweb.sdis39.fr"
 DEFAULT_CAS_SERVICE = "https://artemis/artemis-web"
 
@@ -31,5 +28,5 @@ SMARTEMIS_UPDATE_INTERVAL = timedelta(seconds=30)
 
 MAX_LOOKAHEAD_WEEKS = 8
 
-# WebEvo-only write cycle. Smartemis support is deliberately read-only in 0.6.0.
+# WebEvo write cycle. Smartemis status writes stay internal until live validation.
 STATUS_CYCLE = ("IND", "DI1", "AS1")
