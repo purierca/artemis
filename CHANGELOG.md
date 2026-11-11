@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented here.
 
+## 0.6.2
+
+### Fixed
+
+- Distinguish the Smartemis default display centre from the subscriber's actual affiliated centre.
+- Select personal planning/status from the `getCsPersListXFct` profile whose `person_status_code` is not `N`, instead of using the app's `default_cs` preference.
+- Prevent personal planning requests against a centre where the subscriber is not declared.
+- Keep new Smartemis registration paused pending a safe device-identity coexistence flow; WebEvo remains unchanged.
+
 ## 0.6.1
 
 ### Safety
