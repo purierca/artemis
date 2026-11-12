@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
+from uuid import uuid4
 
 import aiohttp
 import voluptuous as vol
@@ -134,20 +136,23 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def _async_prepare_smartemis(
         self,
         phone_id: str,
+        *,
+        services: tuple[SmartemisSdis, ...] | None = None,
     ) -> tuple[ConfigFlowResult | None, str | None]:
-        """Discover Smartemis services from an existing device identity."""
+        """Prepare service selection from an existing Smartemis device identity."""
 
-        try:
-            services = await self._smartemis_api().async_discover_sdis(phone_id)
-        except SmartemisConnectionError:
-            return None, "cannot_connect"
-        except SmartemisServiceError:
-            return None, "invalid_auth"
-        except Exception:  # noqa: BLE001
-            _LOGGER.exception(
-                "Unexpected Smartemis discovery error; phoneId is not logged"
-            )
-            return None, "unknown"
+        if services is None:
+            try:
+                services = await self._smartemis_api().async_discover_sdis(phone_id)
+            except SmartemisConnectionError:
+                return None, "cannot_connect"
+            except SmartemisServiceError:
+                return None, "invalid_auth"
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception(
+                    "Unexpected Smartemis discovery error; phoneId is not logged"
+                )
+                return None, "unknown"
 
         if not services:
             return None, "cannot_connect"
@@ -190,7 +195,32 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self, "_smartemis_capture_proxy", None
         )
         if proxy is None:
-            proxy = SmartemisCaptureProxy(async_get_clientsession(self.hass))
+            # A fresh Smartemis installation must discover services before it is
+            # registered, so the directory accepts an unregistered device UUID.
+            # This UUID is random, contains no user data and is never persisted.
+            try:
+                services = await self._smartemis_api().async_discover_sdis(
+                    str(uuid4())
+                )
+            except (SmartemisConnectionError, SmartemisServiceError):
+                services = ()
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception(
+                    "Unable to pre-discover Smartemis hosts; ephemeral discovery "
+                    "identifier is not logged"
+                )
+                services = ()
+
+            allowed_hosts = {
+                host
+                for service in services
+                for url in service.urls
+                if (host := urlparse(url).hostname)
+            }
+            proxy = SmartemisCaptureProxy(
+                async_get_clientsession(self.hass),
+                allowed_hosts=allowed_hosts,
+            )
             try:
                 await proxy.async_start()
             except Exception:  # noqa: BLE001
@@ -209,12 +239,23 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
             self._smartemis_capture_proxy = proxy
+            self._smartemis_capture_services = services
+            _LOGGER.debug(
+                "Smartemis automatic detection ready official_services=%s "
+                "allowed_hosts=%s ephemeral_id_persisted=false",
+                len(services),
+                len(allowed_hosts) + 1,
+            )
 
         if user_input is not None:
             phone_id = proxy.captured_phone_id
             if phone_id:
                 await self._async_stop_capture("captured")
-                result, error = await self._async_prepare_smartemis(phone_id)
+                services = getattr(self, "_smartemis_capture_services", None)
+                result, error = await self._async_prepare_smartemis(
+                    phone_id,
+                    services=services or None,
+                )
                 if result is not None:
                     return result
                 errors["base"] = error or "unknown"
