@@ -24,6 +24,16 @@ Do not open a public issue containing exploit details or credentials. Contact th
 
 This integration is intended to use only data that the configured ARTEMIS/Smartemis account is already authorised to access. It does not bypass authentication or application access controls. Smartemis setup reuses an identity already registered by the official app and does not call `recordSubscriber`. The official Smartemis app uses a no-check TLS trust mode; the Smartemis backend mirrors that compatibility behaviour, so only configure a Smartemis server obtained from the official service directory.
 
+## Local Smartemis phoneId capture
+
+Automatic Smartemis setup uses a temporary LAN-only proxy. It binds to one local IPv4 address on an ephemeral port, allows only official Smartemis hosts discovered from the official directory, locks to one phone peer and stops automatically after five minutes.
+
+Before capture, the proxy inspects only recognised Smartemis Thrift requests. After the `phoneId` is found, subsequent Smartemis connections are blind TCP tunnels. The integration never persists captured traffic and never logs request/response bodies or the raw `phoneId`. The ID is stored only in the local Home Assistant config entry after setup.
+
+The proxy forwards intercepted requests only to their original official Smartemis host. No captured credential or operational payload is sent to a repository, analytics service, telemetry endpoint or other third party.
+
+The temporary self-signed certificate and private key are generated locally. Temporary certificate/key files are deleted immediately after the in-memory TLS context loads them.
+
 ## Personal planning writes
 
 `button.cycle_artemis_status` performs a real personal-planning write on both backends. WebEvo keeps its guarded single-row override boundary. Smartemis uses the official app's `updateCurrentPlanning` request with `EOP` (end of current period), and only when the target status is explicitly advertised by `getCurrentPlanning`. The public cycle is limited to `IND` / `DI1` / `AS1`.
