@@ -1,4 +1,4 @@
-"""Shared ARTEMIS status-write button."""
+"""Status-cycle button shared by ARTEMIS WebEvo and Smartemis."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ async def async_setup_entry(
 
 
 class ArtemisCycleStatusButton(CoordinatorEntity, ButtonEntity):
-    """Cycle the current personal status IND -> DI1 -> AS1 -> IND."""
+    """Cycle the personal status IND -> DI1 -> AS1 -> IND."""
 
     _attr_name = "Cycle ARTEMIS status"
     _attr_icon = "mdi:account-switch"
@@ -51,6 +51,7 @@ class ArtemisCycleStatusButton(CoordinatorEntity, ButtonEntity):
         data = self.coordinator.data
         current_code = data.current.code if data and data.current else None
         return {
+            "backend": self.runtime.backend,
             "current_code": current_code,
             "next_code": cycle_status_code(current_code) if current_code else None,
             "override_until": self.coordinator.effective_override_boundary,
