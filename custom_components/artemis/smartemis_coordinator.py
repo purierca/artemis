@@ -77,7 +77,12 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
         self.unit_id = center.id
         self.staff_id = center.person_id or center.matricule
         self.staff_name = center.person_name
+        self.read_only = False
         self._tz = ZoneInfo(hass.config.time_zone)
+        self._available_statuses: dict[str, dict[str, Any]] = {}
+        self._current_period_end_raw: str | None = None
+        self._current_period_end: datetime | None = None
+        self._write_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
         self._allowed_statuses: dict[str, dict[str, Any]] = {}
         self._current_period_end_raw: str | None = None
@@ -155,6 +160,104 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
 
             return target_code
 
+    @property
+    def effective_next_change(self) -> datetime | None:
+        return self.data.next_change if self.data else None
+
+    @property
+    def effective_next_status(self) -> StatusValue | None:
+        return self.data.next_status if self.data else None
+
+    @property
+    def effective_override_boundary(self) -> datetime | None:
+        """Return the Smartemis EOP boundary used by a status write."""
+
+        return self._current_period_end
+
+    @property
+    def status_override_active(self) -> bool:
+        """Smartemis writes target the server current period, not a local override."""
+
+        return False
+
+    def is_status_code_available(self, code: str) -> bool:
+        """Return whether Smartemis explicitly allows a target status."""
+
+        return code in self._available_statuses
+
+    async def async_cycle_status(self) -> str:
+        """Cycle IND -> DI1 -> AS1 -> IND through updateCurrentPlanning."""
+
+        async with self._write_lock:
+            await self.async_request_refresh()
+            if self.data is None or self.data.current is None:
+                raise HomeAssistantError("Smartemis current status is unavailable")
+
+            current_code = self.data.current.code
+            target_code = cycle_status_code(current_code)
+            if target_code is None:
+                raise HomeAssistantError(
+                    f"Smartemis status {current_code} is not in the IND/DI1/AS1 cycle"
+                )
+
+            target_status = self._available_statuses.get(target_code)
+            if target_status is None:
+                raise HomeAssistantError(
+                    f"Smartemis does not allow status {target_code} for this planning"
+                )
+            if not self._current_period_end_raw:
+                raise HomeAssistantError(
+                    "Smartemis did not expose the end of the current planning period"
+                )
+
+            _LOGGER.debug(
+                "Smartemis status write start center=%s current=%s target=%s "
+                "boundary=EOP boundary_time=%s phone_id_logged=false",
+                self.center.id,
+                current_code,
+                target_code,
+                self._current_period_end_raw,
+            )
+            try:
+                await self.api.async_update_current_planning(
+                    self.server,
+                    phone_id=self.phone_id,
+                    center_id=self.center.id,
+                    matricule=self.center.matricule,
+                    status=target_status,
+                    period_end=self._current_period_end_raw,
+                )
+            except (SmartemisConnectionError, SmartemisServiceError) as err:
+                _LOGGER.debug(
+                    "Smartemis status write failed center=%s current=%s target=%s "
+                    "error_type=%s message=%s",
+                    self.center.id,
+                    current_code,
+                    target_code,
+                    type(err).__name__,
+                    str(err),
+                )
+                raise HomeAssistantError(str(err)) from err
+
+            await self.async_request_refresh()
+            observed = (
+                self.data.current.code
+                if self.data is not None and self.data.current is not None
+                else None
+            )
+            _LOGGER.debug(
+                "Smartemis status write read-back center=%s requested=%s observed=%s",
+                self.center.id,
+                target_code,
+                observed,
+            )
+            if observed != target_code:
+                raise HomeAssistantError(
+                    "Smartemis acknowledged the status write but read-back did not "
+                    f"confirm {target_code}"
+                )
+            return target_code
+
     async def _async_update_data(self) -> PlanningSnapshot:
         try:
             payload = await self.api.async_get_current_planning(
@@ -170,6 +273,27 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
 
         current_period = payload.get("current_period") or {}
         current = _status_value(current_period.get("status"))
+        self._current_period_end_raw = (
+            str(current_period.get("end")).strip()
+            if current_period.get("end")
+            else None
+        )
+        self._current_period_end = _parse_datetime(
+            self._current_period_end_raw, self._tz
+        )
+        self._available_statuses = {
+            str(status.get("code")).strip(): status
+            for status in (payload.get("allowed_statuses") or ())
+            if isinstance(status, dict) and status.get("code")
+        }
+        _LOGGER.debug(
+            "Smartemis planning refreshed center=%s current=%s allowed_statuses=%s "
+            "eop=%s phone_id_logged=false",
+            self.center.id,
+            current.code if current else None,
+            sorted(self._available_statuses),
+            self._current_period_end_raw,
+        )
         self._current_period_end_raw = current_period.get("end")
         self._current_period_end = _parse_datetime(
             self._current_period_end_raw, self._tz
