@@ -100,6 +100,12 @@ class CaptureProxyTests(unittest.IsolatedAsyncioTestCase):
         phone_id = "existing-phone-id"
         body = _directory_request(phone_id)
 
+        log_context = self.assertLogs(
+            "custom_components.artemis.smartemis_capture",
+            level="DEBUG",
+        )
+        logs = log_context.__enter__()
+
         reader, writer = await asyncio.open_connection(
             self.proxy.host, self.proxy.port
         )
@@ -140,6 +146,10 @@ class CaptureProxyTests(unittest.IsolatedAsyncioTestCase):
             await self.proxy.async_wait_for_capture(timeout=0.1),
             phone_id,
         )
+        log_context.__exit__(None, None, None)
+        joined_logs = "\n".join(logs.output)
+        self.assertNotIn(phone_id, joined_logs)
+        self.assertIn(capture._phone_id_fingerprint(phone_id), joined_logs)
 
     async def test_rejects_unrelated_connect_target(self) -> None:
         reader, writer = await asyncio.open_connection(
