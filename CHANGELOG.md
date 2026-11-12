@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented here.
 
+## 0.7.2
+
+### Documentation
+
+- Add a complete end-user Smartemis setup walkthrough from HACS installation through final Home Assistant configuration.
+- Explicitly document that setup can be started from any Home Assistant client while the temporary Smartemis detection step is performed on the phone running Smartemis.
+- Document the same automatic detection flow for **Android** and **iOS/iPadOS**, including PAC/automatic proxy configuration and manual proxy fallback.
+- Clarify removal of the temporary Wi-Fi proxy after capture.
+- Clarify that WebEvo and Smartemis expose the same Home Assistant status-cycle button and entity surface.
+
+### Privacy
+
+- Reiterate that the detected Smartemis `phoneId` remains in the local Home Assistant config entry after setup and is not registered as a second Smartemis device.
+
 ## 0.7.1
 
 ### Added
