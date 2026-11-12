@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented here.
 
+## 0.7.1
+
+### Added
+
+- Add automatic Android/iOS Smartemis `phoneId` detection from the Home Assistant config flow using a temporary local proxy.
+- Discover and allow-list official Smartemis service hosts before capture so an already-connected app can be detected from `getSubscriber`, context, planning or intervention traffic without clearing app data.
+- After the first `phoneId` capture, switch later Smartemis connections to blind TCP tunnelling so they are no longer decrypted.
+- Expose the same `button.cycle_artemis_status` on Smartemis and WebEvo.
+
+### Smartemis status writes
+
+- Use the official `updateCurrentPlanning` request with `EOP` (end of current period).
+- Re-read current planning before every write, require the target status to be explicitly advertised by the server, and confirm the result with up to three read-back attempts.
+- Fail closed when the deployment does not expose compatible writable statuses.
+
+### Privacy and diagnostics
+
+- Keep captured `phoneId` in memory during setup and then only in the local Home Assistant config entry.
+- Never log raw Smartemis request/response payloads, `phoneId`, names, addresses, GPS or intervention contents.
+- Add detailed redacted DEBUG logging for protocol calls, latency, status codes, polling counts, capture stages and write/read-back results.
+- Generate interception certificates locally and delete temporary certificate/key files immediately after loading them.
+- Add end-to-end tests for PAC generation, TLS interception, capture from an already-connected Smartemis server, request forwarding, log redaction and post-capture blind tunnelling.
+
 ## 0.7.0
 
 ### Smartemis
