@@ -276,20 +276,25 @@ class SmartemisWriteClientTests(unittest.IsolatedAsyncioTestCase):
 
         session = FakeSession()
         api = smartemis.SmartemisApi(session)
-        result = await api.async_update_current_planning(
-            "https://example.invalid/",
-            phone_id="phone",
-            center_id="05",
-            matricule="MAT",
-            status={
-                "code": "DI1",
-                "name": "DISPONIBLE NIV 1",
-                "rgb": "00FF00",
-                "order": 2,
-            },
-            period_end="2026-11-11T19:00:00.0+0100",
-        )
+        phone_id = "super-secret-phone-id"
+        with self.assertLogs("smartemis", level="DEBUG") as logs:
+            result = await api.async_update_current_planning(
+                "https://example.invalid/",
+                phone_id=phone_id,
+                center_id="05",
+                matricule="MAT",
+                status={
+                    "code": "DI1",
+                    "name": "DISPONIBLE NIV 1",
+                    "rgb": "00FF00",
+                    "order": 2,
+                },
+                period_end="2026-11-11T19:00:00.0+0100",
+            )
 
+        joined_logs = "\n".join(logs.output)
+        self.assertNotIn(phone_id, joined_logs)
+        self.assertIn("updateCurrentPlanning", joined_logs)
         self.assertIn('"updateCurrentPlanning"', session.payload)
         self.assertIn('"EOP"', session.payload)
         self.assertEqual(result["current_period"]["status"]["code"], "DI1")
