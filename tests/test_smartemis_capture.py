@@ -183,6 +183,55 @@ class CaptureProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(phone_id, joined_logs)
         self.assertIn(capture._phone_id_fingerprint(phone_id), joined_logs)
 
+    async def test_post_capture_connections_are_blind_tunnels(self) -> None:
+        async def echo(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+        ) -> None:
+            data = await reader.read(1024)
+            writer.write(data)
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        echo_server = await asyncio.start_server(echo, "127.0.0.1", 0)
+        echo_port = int(echo_server.sockets[0].getsockname()[1])
+        original_port = capture._TARGET_PORT
+        capture._TARGET_PORT = echo_port
+        tunnel_proxy = capture.SmartemisCaptureProxy(
+            object(),
+            allowed_hosts={"127.0.0.1"},
+            bind_host="127.0.0.1",
+            timeout_seconds=30,
+        )
+        tunnel_proxy._captured_phone_id = "already-captured"
+        try:
+            await tunnel_proxy.async_start()
+            reader, writer = await asyncio.open_connection(
+                tunnel_proxy.host, tunnel_proxy.port
+            )
+            writer.write(
+                f"CONNECT 127.0.0.1:{echo_port} HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{echo_port}\r\n\r\n".encode()
+            )
+            await writer.drain()
+            response = await reader.readuntil(b"\r\n\r\n")
+            self.assertIn(b"200 Connection Established", response)
+
+            writer.write(b"opaque-encrypted-bytes")
+            await writer.drain()
+            self.assertEqual(
+                await reader.readexactly(len(b"opaque-encrypted-bytes")),
+                b"opaque-encrypted-bytes",
+            )
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await tunnel_proxy.async_stop(reason="test_cleanup")
+            capture._TARGET_PORT = original_port
+            echo_server.close()
+            await echo_server.wait_closed()
+
     async def test_rejects_unrelated_connect_target(self) -> None:
         reader, writer = await asyncio.open_connection(
             self.proxy.host, self.proxy.port
