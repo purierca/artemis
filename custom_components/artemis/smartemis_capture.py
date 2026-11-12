@@ -330,7 +330,7 @@ class SmartemisCaptureProxy:
                         f' if (host === "{_TARGET_HOST}") return "PROXY {self.host}:{self.port}";'
                         ' return "DIRECT";'
                         "}"
-                    ).encode("utf-8")
+                    ).encode()
                     writer.write(
                         _http_response(
                             200,
