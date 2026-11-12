@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import aiohttp
@@ -32,6 +33,9 @@ from .smartemis import (
     SmartemisSdis,
     SmartemisServiceError,
 )
+from .smartemis_capture import SmartemisCaptureProxy
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def _validate_webevo(data: dict[str, Any]) -> dict[str, str]:
@@ -127,35 +131,122 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def _async_prepare_smartemis(
+        self,
+        phone_id: str,
+    ) -> tuple[ConfigFlowResult | None, str | None]:
+        """Discover Smartemis services from an existing device identity."""
+
+        try:
+            services = await self._smartemis_api().async_discover_sdis(phone_id)
+        except SmartemisConnectionError:
+            return None, "cannot_connect"
+        except SmartemisServiceError:
+            return None, "invalid_auth"
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception(
+                "Unexpected Smartemis discovery error; phoneId is not logged"
+            )
+            return None, "unknown"
+
+        if not services:
+            return None, "cannot_connect"
+
+        self._smartemis_phone_id = phone_id
+        self._smartemis_services = {
+            service.urls[0]: service for service in services if service.urls
+        }
+        _LOGGER.debug(
+            "Smartemis identity accepted for discovery services=%s phone_id_logged=false",
+            len(self._smartemis_services),
+        )
+        return await self.async_step_smartemis_service(), None
+
+    async def _async_stop_capture(self, reason: str) -> None:
+        proxy: SmartemisCaptureProxy | None = getattr(
+            self, "_smartemis_capture_proxy", None
+        )
+        if proxy is not None:
+            await proxy.async_stop(reason=reason)
+            self._smartemis_capture_proxy = None
+
     async def async_step_smartemis(
+        self, _user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose automatic local capture or manual phoneId entry."""
+
+        return self.async_show_menu(
+            step_id="smartemis",
+            menu_options=["smartemis_auto", "smartemis_manual"],
+        )
+
+    async def async_step_smartemis_auto(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Reuse the device identity already registered by the Smartemis app."""
+        """Capture the existing Smartemis phoneId through a temporary local proxy."""
+
+        errors: dict[str, str] = {}
+        proxy: SmartemisCaptureProxy | None = getattr(
+            self, "_smartemis_capture_proxy", None
+        )
+        if proxy is None:
+            proxy = SmartemisCaptureProxy(async_get_clientsession(self.hass))
+            try:
+                await proxy.async_start()
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception(
+                    "Unable to start local Smartemis capture proxy; "
+                    "no phoneId was captured"
+                )
+                return self.async_show_form(
+                    step_id="smartemis_auto",
+                    data_schema=vol.Schema({}),
+                    errors={"base": "capture_unavailable"},
+                    description_placeholders={
+                        "pac_url": "unavailable",
+                        "proxy_host": "unavailable",
+                        "proxy_port": "unavailable",
+                    },
+                )
+            self._smartemis_capture_proxy = proxy
+
+        if user_input is not None:
+            phone_id = proxy.captured_phone_id
+            if phone_id:
+                await self._async_stop_capture("captured")
+                result, error = await self._async_prepare_smartemis(phone_id)
+                if result is not None:
+                    return result
+                errors["base"] = error or "unknown"
+            else:
+                errors["base"] = "phone_id_not_detected"
+
+        return self.async_show_form(
+            step_id="smartemis_auto",
+            data_schema=vol.Schema({}),
+            errors=errors,
+            description_placeholders={
+                "pac_url": proxy.pac_url,
+                "proxy_host": proxy.host,
+                "proxy_port": str(proxy.port),
+            },
+        )
+
+    async def async_step_smartemis_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Reuse a phoneId copied from the official Smartemis app."""
 
         errors: dict[str, str] = {}
         if user_input is not None:
             phone_id = str(user_input[CONF_SMARTEMIS_PHONE_ID]).strip()
-            try:
-                services = await self._smartemis_api().async_discover_sdis(phone_id)
-            except SmartemisConnectionError:
-                errors["base"] = "cannot_connect"
-            except SmartemisServiceError:
-                errors["base"] = "invalid_auth"
-            except Exception:  # noqa: BLE001
-                errors["base"] = "unknown"
-            else:
-                if services:
-                    self._smartemis_phone_id = phone_id
-                    self._smartemis_services = {
-                        service.urls[0]: service
-                        for service in services
-                        if service.urls
-                    }
-                    return await self.async_step_smartemis_service()
-                errors["base"] = "cannot_connect"
+            result, error = await self._async_prepare_smartemis(phone_id)
+            if result is not None:
+                return result
+            errors["base"] = error or "unknown"
 
         return self.async_show_form(
-            step_id="smartemis",
+            step_id="smartemis_manual",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_SMARTEMIS_PHONE_ID): TextSelector(
