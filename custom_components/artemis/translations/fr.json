@@ -26,7 +26,20 @@
       },
       "smartemis": {
         "title": "Connexion à Smartemis",
-        "description": "Saisissez le phoneId déjà utilisé par l’application Smartemis officielle. Home Assistant réutilise cette identité et n’enregistre jamais un second appareil. Traitez cette valeur comme un identifiant sensible ; voir le README pour l’extraction Android.",
+        "description": "Home Assistant peut détecter le phoneId déjà utilisé par l’application Smartemis officielle, sans enregistrer un second appareil.",
+        "menu_options": {
+          "smartemis_auto": "Détecter automatiquement depuis l’application Smartemis",
+          "smartemis_manual": "Saisir le phoneId manuellement"
+        }
+      },
+      "smartemis_auto": {
+        "title": "Détecter le phoneId Smartemis",
+        "description": "Capture locale temporaire uniquement. Sur le téléphone, modifiez le proxy du réseau Wi-Fi actuel. Préférez Automatique/PAC et saisissez {pac_url}. Si PAC n’est pas disponible, utilisez le proxy manuel {proxy_host}:{proxy_port}. Ouvrez ensuite Smartemis une fois, revenez ici et validez. Le proxy ne traite que le serveur d’annuaire Smartemis officiel, s’arrête automatiquement, ne stocke aucun trafic et n’écrit jamais le phoneId brut dans les logs. Supprimez le proxy Wi-Fi après détection.",
+        "data": {}
+      },
+      "smartemis_manual": {
+        "title": "Saisir le phoneId Smartemis",
+        "description": "Saisissez le phoneId déjà enregistré par l’application Smartemis officielle. Home Assistant le réutilise et n’enregistre jamais un second appareil.",
         "data": {
           "smartemis_phone_id": "phoneId Smartemis existant"
         }
@@ -56,6 +69,8 @@
     "error": {
       "cannot_connect": "Impossible de joindre ARTEMIS.",
       "invalid_auth": "L’identité Smartemis existante ou les identifiants ARTEMIS ont été refusés.",
+      "capture_unavailable": "Home Assistant n’a pas pu démarrer le proxy local temporaire. Utilisez la saisie manuelle du phoneId.",
+      "phone_id_not_detected": "Aucun phoneId Smartemis détecté pour l’instant. Vérifiez le proxy Wi-Fi du téléphone, ouvrez Smartemis puis validez à nouveau.",
       "unknown": "Erreur ARTEMIS inattendue. Consultez les journaux Home Assistant."
     },
     "abort": {
