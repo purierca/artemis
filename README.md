@@ -7,7 +7,7 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo** and the **Sm
 
 ## What it does
 
-Version **0.7.1** keeps the Home Assistant surface deliberately small:
+Version **0.7.2** keeps the Home Assistant surface deliberately small:
 
 | Entity | WebEvo | Smartemis | Purpose |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Version **0.7.1** keeps the Home Assistant surface deliberately small:
 | `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, vehicles, address and GPS |
 | `button.cycle_artemis_status` | yes | yes | `IND -> DI1 -> AS1 -> IND` personal status cycle when the backend advertises those statuses |
 
-Version **0.7.1** reuses the exact Smartemis device identity already registered by the official app and exposes the same status-cycle button on both backends. Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
+Version **0.7.2** reuses the exact Smartemis device identity already registered by the official app and exposes the same status-cycle button on both backends. Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
 
 ## Backends
 
@@ -71,7 +71,7 @@ The backend has been validated against the **Service de sécurité incendie de M
 
 #### Smartemis status changes
 
-The official app changes current availability through `updateCurrentPlanning`. Version 0.7.1 exposes that same write through the shared `button.cycle_artemis_status`.
+The official app changes current availability through `updateCurrentPlanning`. Version 0.7.2 exposes that same write through the shared `button.cycle_artemis_status`.
 
 Smartemis writes use `EOP` (end of current planning period), exactly as the app protocol does. Before every press the integration re-reads `getCurrentPlanning`, requires the target status to be explicitly listed by the server, sends the write for the authenticated subscriber's affiliated station/matricule, then re-reads until the new status is visible.
 
@@ -112,6 +112,68 @@ WebEvo keeps its existing independent polling cadences. Smartemis currently poll
 6. Choose **ARTEMIS WebEvo** or **Smartemis mobile**.
 
 Existing 0.5.x installations migrate automatically to the WebEvo backend without changing stored credentials.
+
+### Complete Smartemis setup walkthrough — Android and iOS
+
+The recommended setup is the same whether the Smartemis phone is **Android or iPhone/iPad**. You can start the Home Assistant setup from **any device**: the Home Assistant mobile app, a tablet, a PC or a Mac. The only step that must be done on the Smartemis phone itself is the temporary Wi-Fi proxy configuration and opening Smartemis once.
+
+1. Open Home Assistant from any device.
+2. Open **HACS -> Integrations**.
+3. Install **ARTEMIS / Smartemis**.
+4. Restart Home Assistant.
+5. Go to **Settings -> Devices & services -> Add integration -> ARTEMIS / Smartemis**.
+6. Choose **Smartemis mobile**.
+7. Choose **Detect automatically from the Smartemis app**.
+8. Home Assistant starts a temporary local detection proxy and displays:
+   - an automatic/PAC proxy URL;
+   - a manual proxy host/port fallback;
+   - short instructions for the phone.
+9. Now use the **Android phone or iPhone/iPad where Smartemis is installed**.
+10. Make sure that phone is connected to the **same local network as Home Assistant**.
+11. Open the Wi-Fi settings for the current network.
+12. Configure the proxy:
+    - on **iOS/iPadOS**: Wi-Fi -> current network -> **Configure Proxy -> Automatic**, then paste the PAC URL shown by Home Assistant;
+    - on **Android**: Wi-Fi -> current network -> edit/advanced network options -> **Proxy -> Auto-config/PAC** when available, then paste the PAC URL shown by Home Assistant;
+    - if the phone does not offer PAC/automatic proxy mode, use the **manual proxy host and port** shown by Home Assistant.
+13. Save the Wi-Fi settings.
+14. Open the official **Smartemis** app normally.
+15. You normally do **not** need to log out or sign in again.
+16. Let Smartemis load for a few seconds.
+17. Home Assistant detects the existing Smartemis `phoneId` from normal Smartemis traffic.
+18. Home Assistant does **not** call `recordSubscriber` and does **not** create a second Smartemis device identity.
+19. Return to the Home Assistant setup screen.
+20. Home Assistant validates the existing identity and retrieves the available Smartemis service(s).
+21. Choose your fire service, for example:
+    - a French SDIS;
+    - **SIM Montréal**.
+22. Home Assistant validates:
+    - the subscriber identity;
+    - the actual affiliated station;
+    - the Smartemis rights exposed by the server.
+23. Check that the displayed service/station is correct, then finish setup.
+24. Return to the Smartemis phone Wi-Fi settings.
+25. Set the Wi-Fi proxy back to **Off / None**.
+26. The temporary proxy is no longer needed after setup.
+27. Home Assistant then uses the captured `phoneId` directly from its **local config entry** for future Smartemis reads/writes.
+
+After setup, the entity surface is the same on both backends:
+
+- `sensor.statut_artemis`;
+- `sensor.interventions_artemis`;
+- `button.cycle_artemis_status`.
+
+The same status button therefore works whether the integration is connected through **ARTEMIS WebEvo** or **Smartemis**:
+
+```text
+IND -> DI1 -> AS1 -> IND
+```
+
+The server-side implementation differs, but the Home Assistant entity is intentionally identical:
+
+- WebEvo writes through its guarded `saveStaff` workflow;
+- Smartemis writes through `updateCurrentPlanning` with the current period's `EOP` boundary.
+
+If automatic detection cannot be used, choose the manual `phoneId` setup option instead.
 
 ### Manual
 
