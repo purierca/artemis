@@ -26,7 +26,20 @@
       },
       "smartemis": {
         "title": "Connect Smartemis",
-        "description": "Enter the phoneId already used by the official Smartemis app. Home Assistant reuses that identity and never registers a second device. Treat this value like a credential; see the README for Android extraction instructions.",
+        "description": "Home Assistant can detect the phoneId already used by the official Smartemis app, without registering another device.",
+        "menu_options": {
+          "smartemis_auto": "Detect automatically from the Smartemis app",
+          "smartemis_manual": "Enter phoneId manually"
+        }
+      },
+      "smartemis_auto": {
+        "title": "Detect Smartemis phoneId",
+        "description": "Temporary local capture only. On the phone, edit the current Wi-Fi network proxy. Prefer Automatic/PAC and enter {pac_url}. If PAC is unavailable, use Manual proxy {proxy_host}:{proxy_port}. Then open Smartemis once and return here to press Submit. The proxy handles only the official Smartemis directory host, stops automatically, stores no traffic, and never logs the raw phoneId. Remove the Wi-Fi proxy after detection.",
+        "data": {}
+      },
+      "smartemis_manual": {
+        "title": "Enter Smartemis phoneId",
+        "description": "Enter the phoneId already registered by the official Smartemis app. Home Assistant reuses it and never registers a second device.",
         "data": {
           "smartemis_phone_id": "Existing Smartemis phoneId"
         }
@@ -56,6 +69,8 @@
     "error": {
       "cannot_connect": "Unable to reach ARTEMIS.",
       "invalid_auth": "The existing Smartemis identity or ARTEMIS credentials were rejected.",
+      "capture_unavailable": "Home Assistant could not start the temporary local capture proxy. Use manual phoneId entry instead.",
+      "phone_id_not_detected": "No Smartemis phoneId was detected yet. Check the phone Wi-Fi proxy, open Smartemis, then submit again.",
       "unknown": "Unexpected ARTEMIS error. Check the Home Assistant logs."
     },
     "abort": {
