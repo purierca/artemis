@@ -155,12 +155,13 @@ class SmartemisPlanningCoordinator(DataUpdateCoordinator[PlanningSnapshot]):
             except (SmartemisConnectionError, SmartemisServiceError) as err:
                 _LOGGER.debug(
                     "Smartemis status write failed center=%s current=%s target=%s "
-                    "error_type=%s message=%s",
+                    "error_type=%s service_code=%s service_num=%s",
                     self.center.id,
                     current_code,
                     target_code,
                     type(err).__name__,
-                    str(err),
+                    getattr(err, "code", None),
+                    getattr(err, "num", None),
                 )
                 raise HomeAssistantError(str(err)) from err
 
