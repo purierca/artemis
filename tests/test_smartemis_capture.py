@@ -33,20 +33,26 @@ def _directory_request(phone_id: str) -> bytes:
 class CaptureParserTests(unittest.TestCase):
     def test_extracts_only_retrieve_sdis_phone_id(self) -> None:
         self.assertEqual(
-            capture._extract_retrieve_sdis_phone_id(
+            capture._extract_smartemis_phone_id(
                 _directory_request("existing-phone-id")
             ),
-            "existing-phone-id",
+            ("retrieveSdisList", "existing-phone-id"),
         )
-        self.assertIsNone(
-            capture._extract_retrieve_sdis_phone_id(
+        self.assertEqual(
+            capture._extract_smartemis_phone_id(
                 smartemis._request(
                     "getSubscriber",
-                    {1: smartemis._scalar("str", "existing-phone-id")},
+                    {
+                        1: smartemis._scalar("str", "existing-phone-id"),
+                        2: smartemis._scalar("tf", 1),
+                        3: smartemis._scalar("tf", 1),
+                        4: smartemis._scalar("tf", 1),
+                    },
                 ).encode()
-            )
+            ),
+            ("getSubscriber", "existing-phone-id"),
         )
-        self.assertIsNone(capture._extract_retrieve_sdis_phone_id(b"not-json"))
+        self.assertIsNone(capture._extract_smartemis_phone_id(b"not-json"))
 
     def test_log_fingerprint_is_non_reversible_representation(self) -> None:
         phone_id = "existing-phone-id"
@@ -59,8 +65,21 @@ class CaptureProxyTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.forwarded: list[bytes] = []
 
-        async def forwarder(body: bytes) -> tuple[int, bytes, str]:
+        async def forwarder(
+            host: str,
+            method: str,
+            target: str,
+            headers: dict[str, str],
+            body: bytes,
+        ) -> tuple[int, bytes, str]:
             self.forwarded.append(body)
+            self.assertIn(host, {
+                "smartemis.artemis-solutions.net",
+                "operations-apps.sim.montreal.ca",
+            })
+            self.assertEqual(method, "POST")
+            self.assertTrue(target.startswith("/"))
+            self.assertIn("content-type", headers)
             return (
                 200,
                 b'[1,"retrieveSdisList",2,0,{"0":{"rec":{"1":{"rec":{"1":{"str":"OK"},"2":{"i32":0}}},"2":{"lst":["rec",0]}}}}}]',
@@ -69,6 +88,10 @@ class CaptureProxyTests(unittest.IsolatedAsyncioTestCase):
 
         self.proxy = capture.SmartemisCaptureProxy(
             object(),
+            allowed_hosts={
+                "smartemis.artemis-solutions.net",
+                "operations-apps.sim.montreal.ca",
+            },
             bind_host="127.0.0.1",
             timeout_seconds=30,
             forwarder=forwarder,
@@ -93,12 +116,21 @@ class CaptureProxyTests(unittest.IsolatedAsyncioTestCase):
         text = response.decode("latin-1")
         self.assertIn("200 OK", text)
         self.assertIn("smartemis.artemis-solutions.net", text)
+        self.assertIn("operations-apps.sim.montreal.ca", text)
         self.assertIn(f"PROXY {self.proxy.host}:{self.proxy.port}", text)
         self.assertIn('return "DIRECT"', text)
 
     async def test_tls_capture_extracts_and_forwards_without_mutation(self) -> None:
         phone_id = "existing-phone-id"
-        body = _directory_request(phone_id)
+        body = smartemis._request(
+            "getSubscriber",
+            {
+                1: smartemis._scalar("str", phone_id),
+                2: smartemis._scalar("tf", 1),
+                3: smartemis._scalar("tf", 1),
+                4: smartemis._scalar("tf", 1),
+            },
+        ).encode()
 
         log_context = self.assertLogs(
             "custom_components.artemis.smartemis_capture",
@@ -110,8 +142,8 @@ class CaptureProxyTests(unittest.IsolatedAsyncioTestCase):
             self.proxy.host, self.proxy.port
         )
         writer.write(
-            b"CONNECT smartemis.artemis-solutions.net:443 HTTP/1.1\r\n"
-            b"Host: smartemis.artemis-solutions.net:443\r\n\r\n"
+            b"CONNECT operations-apps.sim.montreal.ca:443 HTTP/1.1\r\n"
+            b"Host: operations-apps.sim.montreal.ca:443\r\n\r\n"
         )
         await writer.drain()
         connect_response = await reader.readuntil(b"\r\n\r\n")
@@ -122,12 +154,12 @@ class CaptureProxyTests(unittest.IsolatedAsyncioTestCase):
         client_context.verify_mode = ssl.CERT_NONE
         await writer.start_tls(
             client_context,
-            server_hostname="smartemis.artemis-solutions.net",
+            server_hostname="operations-apps.sim.montreal.ca",
         )
 
         writer.write(
             b"POST /subscription/ HTTP/1.1\r\n"
-            b"Host: smartemis.artemis-solutions.net\r\n"
+            b"Host: operations-apps.sim.montreal.ca\r\n"
             b"Content-Type: application/json\r\n"
             + f"Content-Length: {len(body)}\r\n".encode()
             + b"Connection: close\r\n\r\n"
