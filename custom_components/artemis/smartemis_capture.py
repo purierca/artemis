@@ -1,13 +1,15 @@
 """Temporary local proxy used to capture an existing Smartemis phoneId.
 
-The proxy is deliberately narrow:
-- it binds to one local IPv4 address on an ephemeral port;
-- the PAC file proxies only the official Smartemis directory host;
-- only one client peer is accepted during a capture session;
-- only the retrieveSdisList request is inspected;
-- request bodies and phoneIds are never written to logs;
-- the TLS certificate/key are generated in memory and temporary files are deleted
-  immediately after the SSL context has loaded them.
+Privacy and scope are intentionally narrow:
+- bind only to one LAN IPv4 address on an ephemeral port;
+- proxy only official Smartemis hosts supplied by the config flow;
+- accept only one phone peer during a capture session;
+- inspect only the first Smartemis Thrift request needed to recover phoneId;
+- after capture, tunnel later HTTPS connections without decrypting them;
+- never log request/response payloads or the raw phoneId;
+- keep captured data in memory only until the config entry is created;
+- generate a temporary certificate/key locally and delete the temporary files
+  immediately after the SSL context loads them.
 """
 
 from __future__ import annotations
@@ -38,23 +40,36 @@ _LOGGER = logging.getLogger(__name__)
 _CAPTURE_TIMEOUT_SECONDS = 300
 _HEADER_LIMIT = 16 * 1024
 _BODY_LIMIT = 64 * 1024
-_TARGET_HOST = urlparse(SMARTEMIS_DIRECTORY_URL).hostname or ""
+_DIRECTORY_HOST = urlparse(SMARTEMIS_DIRECTORY_URL).hostname or ""
 _TARGET_PORT = 443
+_SMARTEMIS_METHODS = {
+    "retrieveSdisList",
+    "getSubscriber",
+    "getUserContext",
+    "getCsPersListXFct",
+    "getCurrentPlanning",
+    "updateCurrentPlanning",
+    "getSyItv",
+    "getItv",
+}
 
-Forwarder = Callable[[bytes], Awaitable[tuple[int, bytes, str]]]
+Forwarder = Callable[
+    [str, str, str, dict[str, str], bytes],
+    Awaitable[tuple[int, bytes, str]],
+]
 
 
 def _phone_id_fingerprint(phone_id: str) -> str:
     """Return a non-reversible short fingerprint suitable for debug logs."""
 
-    return hashlib.sha256(phone_id.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(phone_id.encode()).hexdigest()[:12]
 
 
-def _extract_retrieve_sdis_phone_id(body: bytes) -> str | None:
-    """Extract phoneId only from the exact retrieveSdisList Thrift request."""
+def _extract_smartemis_phone_id(body: bytes) -> tuple[str, str] | None:
+    """Extract (method, phoneId) from a known Smartemis Thrift CALL request."""
 
     try:
-        payload = json.loads(body.decode("utf-8"))
+        payload = json.loads(body.decode())
     except (UnicodeDecodeError, ValueError):
         return None
 
@@ -62,8 +77,8 @@ def _extract_retrieve_sdis_phone_id(body: bytes) -> str | None:
         not isinstance(payload, list)
         or len(payload) < 5
         or payload[0] != 1
-        or payload[1] != "retrieveSdisList"
         or payload[2] != 1
+        or payload[1] not in _SMARTEMIS_METHODS
     ):
         return None
 
@@ -73,16 +88,16 @@ def _extract_retrieve_sdis_phone_id(body: bytes) -> str | None:
         return None
 
     value = str(phone_id).strip()
-    return value or None
+    return (str(payload[1]), value) if value else None
 
 
 def _discover_local_ipv4() -> str:
-    """Return the IPv4 address used by the host's default route without sending data."""
+    """Return the IPv4 address selected by the host's default route."""
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # TEST-NET-1 is non-routable. connect() only asks the kernel which local
-        # interface it would use; no packet is transmitted.
+        # TEST-NET-1 is non-routable. connect() only asks the kernel to select
+        # a local interface; no packet is sent.
         sock.connect(("192.0.2.1", 9))
         address = str(sock.getsockname()[0])
     finally:
@@ -94,7 +109,7 @@ def _discover_local_ipv4() -> str:
 
 
 def _build_ephemeral_tls_context(hostname: str) -> ssl.SSLContext:
-    """Create a short-lived self-signed certificate and return a TLS server context."""
+    """Create a short-lived self-signed certificate for local interception."""
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)])
@@ -147,7 +162,7 @@ def _build_ephemeral_tls_context(hostname: str) -> ssl.SSLContext:
 async def _read_http_request(
     reader: asyncio.StreamReader,
 ) -> tuple[str, str, dict[str, str], bytes]:
-    """Read one small HTTP request from a stream."""
+    """Read one bounded HTTP request from a stream."""
 
     raw_headers = await reader.readuntil(b"\r\n\r\n")
     if len(raw_headers) > _HEADER_LIMIT:
@@ -186,24 +201,31 @@ def _http_response(
         f"Content-Length: {len(body)}\r\n"
         "Connection: close\r\n"
         "\r\n"
-    ).encode("ascii") + body
+    ).encode() + body
 
 
 class SmartemisCaptureProxy:
-    """One-shot local HTTPS interception proxy for Smartemis directory discovery."""
+    """One-shot local HTTPS interception proxy for official Smartemis hosts."""
 
     def __init__(
         self,
         session: aiohttp.ClientSession,
         *,
+        allowed_hosts: set[str] | None = None,
         bind_host: str | None = None,
         timeout_seconds: int = _CAPTURE_TIMEOUT_SECONDS,
         forwarder: Forwarder | None = None,
     ) -> None:
         self._session = session
+        self._allowed_hosts = {
+            host.lower()
+            for host in (allowed_hosts or {_DIRECTORY_HOST})
+            if host
+        }
+        self._allowed_hosts.add(_DIRECTORY_HOST)
         self._bind_host = bind_host
         self._timeout_seconds = timeout_seconds
-        self._forwarder = forwarder or self._forward_directory_request
+        self._forwarder = forwarder or self._forward_smartemis_request
         self._server: asyncio.AbstractServer | None = None
         self._timeout_task: asyncio.Task[None] | None = None
         self._tls_context: ssl.SSLContext | None = None
@@ -243,7 +265,10 @@ class SmartemisCaptureProxy:
         if self._bind_host is None:
             self._bind_host = _discover_local_ipv4()
 
-        self._tls_context = _build_ephemeral_tls_context(_TARGET_HOST)
+        # Smartemis configures the native HTTP plugin with trust mode "nocheck".
+        # One ephemeral certificate is therefore sufficient for the allow-listed
+        # Smartemis hosts; no CA is installed on the phone.
+        self._tls_context = _build_ephemeral_tls_context(_DIRECTORY_HOST)
         self._server = await asyncio.start_server(
             self._handle_client,
             self._bind_host,
@@ -255,11 +280,11 @@ class SmartemisCaptureProxy:
         self._timeout_task = asyncio.create_task(self._auto_stop())
 
         _LOGGER.debug(
-            "Smartemis capture started host=%s port=%s target=%s ttl=%ss "
+            "Smartemis capture started host=%s port=%s allowed_hosts=%s ttl=%ss "
             "storage=memory-only payload_logging=disabled phone_id_logging=hashed-only",
             self.host,
             self.port,
-            _TARGET_HOST,
+            len(self._allowed_hosts),
             self._timeout_seconds,
         )
 
@@ -305,6 +330,16 @@ class SmartemisCaptureProxy:
             return True
         return peer == self._authorized_peer
 
+    def _pac_body(self) -> bytes:
+        hosts = json.dumps(sorted(self._allowed_hosts), separators=(",", ":"))
+        return (
+            "function FindProxyForURL(url, host) {"
+            f" var h={hosts};"
+            f' if (h.indexOf(host.toLowerCase()) >= 0) return "PROXY {self.host}:{self.port}";'
+            ' return "DIRECT";'
+            "}"
+        ).encode()
+
     async def _handle_client(
         self,
         reader: asyncio.StreamReader,
@@ -323,18 +358,14 @@ class SmartemisCaptureProxy:
 
             if method == "GET" and target.split("?", 1)[0] == "/proxy.pac":
                 if not self._peer_allowed(peer):
-                    writer.write(_http_response(403, b"Forbidden", content_type="text/plain"))
+                    writer.write(
+                        _http_response(403, b"Forbidden", content_type="text/plain")
+                    )
                 else:
-                    pac = (
-                        "function FindProxyForURL(url, host) {"
-                        f' if (host === "{_TARGET_HOST}") return "PROXY {self.host}:{self.port}";'
-                        ' return "DIRECT";'
-                        "}"
-                    ).encode()
                     writer.write(
                         _http_response(
                             200,
-                            pac,
+                            self._pac_body(),
                             content_type="application/x-ns-proxy-autoconfig",
                         )
                     )
@@ -342,25 +373,43 @@ class SmartemisCaptureProxy:
                 return
 
             if method != "CONNECT":
-                writer.write(_http_response(405, b"Method Not Allowed", content_type="text/plain"))
+                writer.write(
+                    _http_response(405, b"Method Not Allowed", content_type="text/plain")
+                )
                 await writer.drain()
                 return
 
             if not self._peer_allowed(peer):
-                _LOGGER.debug("Smartemis capture CONNECT rejected peer=%s reason=peer_mismatch", peer)
-                writer.write(_http_response(403, b"Forbidden", content_type="text/plain"))
+                _LOGGER.debug(
+                    "Smartemis capture CONNECT rejected peer=%s reason=peer_mismatch",
+                    peer,
+                )
+                writer.write(
+                    _http_response(403, b"Forbidden", content_type="text/plain")
+                )
                 await writer.drain()
                 return
 
             connect_host, _, connect_port = target.partition(":")
-            if connect_host.lower() != _TARGET_HOST or connect_port not in {"", str(_TARGET_PORT)}:
+            connect_host = connect_host.lower()
+            if (
+                connect_host not in self._allowed_hosts
+                or connect_port not in {"", str(_TARGET_PORT)}
+            ):
                 _LOGGER.debug(
-                    "Smartemis capture CONNECT rejected peer=%s host=%s reason=target_not_allowed",
+                    "Smartemis capture CONNECT rejected peer=%s host=%s "
+                    "reason=target_not_allowed",
                     peer,
                     connect_host,
                 )
-                writer.write(_http_response(403, b"Forbidden", content_type="text/plain"))
+                writer.write(
+                    _http_response(403, b"Forbidden", content_type="text/plain")
+                )
                 await writer.drain()
+                return
+
+            if self.captured:
+                await self._blind_tunnel(reader, writer, connect_host, _TARGET_PORT)
                 return
 
             writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
@@ -377,35 +426,42 @@ class SmartemisCaptureProxy:
 
             inner_method, inner_target, headers, body = await _read_http_request(reader)
             _LOGGER.debug(
-                "Smartemis capture HTTPS request peer=%s method=%s path=%s bytes=%s content_type=%s",
+                "Smartemis capture HTTPS request peer=%s host=%s method=%s path=%s "
+                "bytes=%s content_type=%s",
                 peer,
+                connect_host,
                 inner_method,
                 inner_target.split("?", 1)[0],
                 len(body),
                 headers.get("content-type", ""),
             )
 
-            phone_id = _extract_retrieve_sdis_phone_id(body)
-            if phone_id is not None:
+            captured = _extract_smartemis_phone_id(body)
+            if captured is not None:
+                thrift_method, phone_id = captured
                 self._captured_phone_id = phone_id
                 self._capture_event.set()
                 _LOGGER.debug(
-                    "Smartemis phoneId captured peer=%s fingerprint=%s length=%s "
-                    "raw_value_logged=false",
+                    "Smartemis phoneId captured peer=%s host=%s thrift_method=%s "
+                    "fingerprint=%s length=%s raw_value_logged=false",
                     peer,
+                    connect_host,
+                    thrift_method,
                     _phone_id_fingerprint(phone_id),
                     len(phone_id),
                 )
 
-            if inner_method != "POST":
-                writer.write(_http_response(405, b"Method Not Allowed", content_type="text/plain"))
-                await writer.drain()
-                return
-
-            status, response_body, content_type = await self._forwarder(body)
+            status, response_body, content_type = await self._forwarder(
+                connect_host,
+                inner_method,
+                inner_target,
+                headers,
+                body,
+            )
             _LOGGER.debug(
-                "Smartemis directory response forwarded peer=%s status=%s bytes=%s",
+                "Smartemis response forwarded peer=%s host=%s status=%s bytes=%s",
                 peer,
+                connect_host,
                 status,
                 len(response_body),
             )
@@ -422,7 +478,9 @@ class SmartemisCaptureProxy:
                 type(err).__name__,
             )
             try:
-                writer.write(_http_response(502, b"Bad Gateway", content_type="text/plain"))
+                writer.write(
+                    _http_response(502, b"Bad Gateway", content_type="text/plain")
+                )
                 await writer.drain()
             except Exception:  # noqa: BLE001
                 pass
@@ -433,24 +491,102 @@ class SmartemisCaptureProxy:
             except Exception:  # noqa: BLE001
                 pass
 
-    async def _forward_directory_request(
+    async def _blind_tunnel(
         self,
-        body: bytes,
-    ) -> tuple[int, bytes, str]:
-        """Forward the original directory request directly to the official endpoint."""
+        client_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+        host: str,
+        port: int,
+    ) -> None:
+        """Tunnel post-capture TLS without decrypting or inspecting it."""
 
         _LOGGER.debug(
-            "Smartemis directory forward start target=%s request_bytes=%s "
-            "request_body_logged=false",
-            _TARGET_HOST,
+            "Smartemis post-capture blind tunnel start host=%s payload_inspection=false",
+            host,
+        )
+        upstream_reader, upstream_writer = await asyncio.open_connection(host, port)
+        client_writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        await client_writer.drain()
+
+        async def relay(
+            source: asyncio.StreamReader,
+            destination: asyncio.StreamWriter,
+        ) -> None:
+            try:
+                while chunk := await source.read(64 * 1024):
+                    destination.write(chunk)
+                    await destination.drain()
+            except (ConnectionError, asyncio.IncompleteReadError):
+                pass
+            finally:
+                try:
+                    destination.write_eof()
+                except (AttributeError, OSError, RuntimeError):
+                    pass
+
+        await asyncio.gather(
+            relay(client_reader, upstream_writer),
+            relay(upstream_reader, client_writer),
+            return_exceptions=True,
+        )
+        upstream_writer.close()
+        try:
+            await upstream_writer.wait_closed()
+        except Exception:  # noqa: BLE001
+            pass
+        _LOGGER.debug("Smartemis post-capture blind tunnel stop host=%s", host)
+
+    async def _forward_smartemis_request(
+        self,
+        host: str,
+        method: str,
+        target: str,
+        headers: dict[str, str],
+        body: bytes,
+    ) -> tuple[int, bytes, str]:
+        """Forward one intercepted request only to its allow-listed Smartemis host."""
+
+        if host not in self._allowed_hosts:
+            raise ConnectionError("Smartemis forwarding target is not allow-listed")
+
+        parsed_target = urlparse(target)
+        path = (
+            parsed_target.path
+            + (f"?{parsed_target.query}" if parsed_target.query else "")
+            if parsed_target.scheme
+            else target
+        )
+        if not path.startswith("/"):
+            raise ConnectionError("Smartemis forwarding path is invalid")
+
+        hop_by_hop = {
+            "connection",
+            "proxy-connection",
+            "keep-alive",
+            "transfer-encoding",
+            "host",
+            "content-length",
+        }
+        forward_headers = {
+            key: value for key, value in headers.items() if key not in hop_by_hop
+        }
+        url = f"https://{host}{path}"
+        _LOGGER.debug(
+            "Smartemis forward start host=%s method=%s path=%s request_bytes=%s "
+            "request_payload_logged=false",
+            host,
+            method,
+            path.split("?", 1)[0],
             len(body),
         )
         try:
-            async with self._session.post(
-                SMARTEMIS_DIRECTORY_URL,
+            async with self._session.request(
+                method,
+                url,
                 data=body,
-                headers={"Content-Type": "application/json"},
+                headers=forward_headers,
                 timeout=aiohttp.ClientTimeout(total=20),
+                ssl=False,
             ) as response:
                 response_body = await response.read()
                 content_type = response.headers.get(
@@ -459,5 +595,5 @@ class SmartemisCaptureProxy:
                 return response.status, response_body, content_type
         except (aiohttp.ClientError, TimeoutError) as err:
             raise ConnectionError(
-                f"Smartemis directory forwarding failed: {type(err).__name__}"
+                f"Smartemis forwarding failed: {type(err).__name__}"
             ) from err
