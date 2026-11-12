@@ -417,10 +417,9 @@ class SmartemisCaptureProxy:
             _LOGGER.debug("Smartemis capture client disconnected peer=%s", peer)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug(
-                "Smartemis capture client error peer=%s type=%s message=%s",
+                "Smartemis capture client error peer=%s type=%s",
                 peer,
                 type(err).__name__,
-                str(err),
             )
             try:
                 writer.write(_http_response(502, b"Bad Gateway", content_type="text/plain"))
