@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -17,6 +20,8 @@ BOUNDARY_END_OF_PERIOD = "EOP"
 RIGHT_PARAMETERS = "SMART:FCT:PARAM"
 YES = "O"
 THRIFT_NULL = "null"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class SmartemisError(Exception):
@@ -447,15 +452,36 @@ class SmartemisApi:
         method: str,
         fields: dict[int, dict[str, Any]],
     ) -> dict[int, Any]:
+        host = urlparse(url).hostname or "unknown"
+        payload = _request(method, fields)
+        started = time.monotonic()
+        _LOGGER.debug(
+            "Smartemis request start method=%s host=%s bytes=%s tls_verify=%s "
+            "request_payload_logged=false",
+            method,
+            host,
+            len(payload),
+            self._verify_ssl,
+        )
         try:
             async with self._session.post(
                 url,
-                data=_request(method, fields),
+                data=payload,
                 headers={"Content-Type": "application/json"},
                 timeout=self._timeout,
                 ssl=self._verify_ssl,
             ) as response:
                 text = await response.text()
+                elapsed_ms = round((time.monotonic() - started) * 1000)
+                _LOGGER.debug(
+                    "Smartemis response method=%s host=%s status=%s bytes=%s "
+                    "elapsed_ms=%s response_payload_logged=false",
+                    method,
+                    host,
+                    response.status,
+                    len(text),
+                    elapsed_ms,
+                )
                 if response.status >= 400:
                     raise SmartemisConnectionError(
                         f"Smartemis HTTP {response.status} for {method}"
@@ -463,6 +489,15 @@ class SmartemisApi:
         except SmartemisError:
             raise
         except (aiohttp.ClientError, TimeoutError) as err:
+            elapsed_ms = round((time.monotonic() - started) * 1000)
+            _LOGGER.debug(
+                "Smartemis request failed method=%s host=%s elapsed_ms=%s "
+                "error_type=%s payload_logged=false",
+                method,
+                host,
+                elapsed_ms,
+                type(err).__name__,
+            )
             raise SmartemisConnectionError(str(err)) from err
         return _decode_response(text, method)
 
