@@ -7,7 +7,7 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo** and the **Sm
 
 ## What it does
 
-Version **0.7.0** keeps the Home Assistant surface deliberately small:
+Version **0.7.1** keeps the Home Assistant surface deliberately small:
 
 | Entity | WebEvo | Smartemis | Purpose |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Version **0.7.0** keeps the Home Assistant surface deliberately small:
 | `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, vehicles, address and GPS |
 | `button.cycle_artemis_status` | yes | yes | `IND -> DI1 -> AS1 -> IND` personal status cycle when the backend advertises those statuses |
 
-Version **0.7.0** reuses the exact Smartemis device identity already registered by the official app and exposes the same status-cycle button on both backends. Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
+Version **0.7.1** reuses the exact Smartemis device identity already registered by the official app and exposes the same status-cycle button on both backends. Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
 
 ## Backends
 
@@ -29,48 +29,49 @@ The Smartemis backend follows the Apache Thrift JSON protocol used by the offici
 
 Home Assistant deliberately **does not call `recordSubscriber`**. Smartemis deployments may associate one registered device identity with an account, and registering a new random identity can invalidate the official mobile-app session.
 
-Instead, setup reuses the official app's existing `phoneId`:
+Instead, setup reuses the official app's existing `phoneId`.
 
-1. enter the existing Smartemis `phoneId`;
-2. Home Assistant uses it only to fetch the official service list;
-3. choose the same fire service as in the app;
-4. Home Assistant validates the identity with `getSubscriber(phoneId)`;
-5. all later reads use that same identity in parallel with the mobile app.
+#### Automatic phoneId detection — Android and iOS
 
-The `phoneId` is stored in the Home Assistant config entry and must be treated like a credential.
+The recommended setup is entirely driven from the Home Assistant config flow:
 
-#### Getting the existing phoneId on Android
+1. choose **Smartemis mobile -> Detect automatically from the Smartemis app**;
+2. Home Assistant discovers the official Smartemis service hosts using a disposable random UUID that contains no user data and is never persisted;
+3. Home Assistant starts a temporary proxy bound only to its LAN IPv4 address on a random high port;
+4. on the phone's current Wi-Fi network, set the proxy to **Automatic/PAC** and paste the PAC URL shown by Home Assistant; if PAC is unavailable, use the temporary manual proxy host/port shown by Home Assistant;
+5. open the official Smartemis app once;
+6. Home Assistant captures the existing `phoneId` from the first recognised Smartemis Thrift request, forwards that request to its original official Smartemis server, and validates the identity;
+7. return to Home Assistant, continue setup, then remove the temporary Wi-Fi proxy.
 
-Smartemis 6.0.22 stores `device.uuid` as `phoneId`. On Android this comes from the app's Android ID and the app logs the value as `PHONE ID GENERATED` when its local storage is initialised.
+The capture proxy is deliberately narrow:
 
-With Android platform tools / ADB connected, first check whether the line is still in the device log:
+- only hosts returned by the official Smartemis directory are proxied;
+- only one phone peer is accepted during the five-minute capture window;
+- only the first recognised Smartemis request is inspected for `phoneId`;
+- once the ID is captured, later Smartemis connections are blind TCP tunnels and are no longer decrypted;
+- request/response bodies, firefighter identity, intervention data and the raw `phoneId` are never written to integration logs;
+- the captured ID exists only in memory during setup, then is stored in the local Home Assistant config entry;
+- the temporary TLS certificate/private key are generated locally, loaded into memory and their temporary files are immediately deleted;
+- no captured value is sent to any third-party service. The intercepted request is forwarded only to the official Smartemis endpoint it was already addressed to.
+
+Smartemis 6.0.22 configures its native HTTP plugin with certificate trust mode `nocheck`, which is why the temporary interception does not require installing a CA certificate on the phone.
+
+#### Manual phoneId fallback
+
+Manual entry remains available. On Android, Smartemis stores `device.uuid` as `phoneId` and may log `PHONE ID GENERATED` when its local storage is initialised:
 
 ```bash
 adb logcat -d | grep -F "PHONE ID GENERATED"
 ```
 
-If it is no longer present:
+Do **not** generate a replacement UUID and do not use `adb shell settings get secure android_id` as a substitute. Home Assistant must reuse the exact identifier already registered by Smartemis.
 
-1. run `adb logcat -c`;
-2. start a live capture:
-
-   ```bash
-   adb logcat | grep -F "PHONE ID GENERATED"
-   ```
-
-3. in Android settings, clear **Smartemis app storage/data**;
-4. launch Smartemis once;
-5. copy the value printed after `PHONE ID GENERATED`;
-6. sign back into the official Smartemis app normally;
-7. use that exact value in Home Assistant.
-
-Clearing app storage signs the app out and removes its local settings, so make sure you can sign back in first. Do **not** use a random UUID and do not use `adb shell settings get secure android_id` as a substitute on modern Android: the identifier exposed to an app can be scoped to the app signing key/user/device.
 
 The backend has been validated against the **Service de sécurité incendie de Montréal (SIM)** for authentication reuse and read access, including global active interventions, engaged stations/vehicles, vehicle states, addresses and GPS. Smartemis' `default_cs` setting is treated only as the app's default displayed station; personal planning uses the actual affiliated station exposed by the subscriber profile.
 
 #### Smartemis status changes
 
-The official app changes current availability through `updateCurrentPlanning`. Version 0.7.0 exposes that same write through the shared `button.cycle_artemis_status`.
+The official app changes current availability through `updateCurrentPlanning`. Version 0.7.1 exposes that same write through the shared `button.cycle_artemis_status`.
 
 Smartemis writes use `EOP` (end of current planning period), exactly as the app protocol does. Before every press the integration re-reads `getCurrentPlanning`, requires the target status to be explicitly listed by the server, sends the write for the authenticated subscriber's affiliated station/matricule, then re-reads until the new status is visible.
 
@@ -345,7 +346,21 @@ Validated deployments:
 - **ARTEMIS WebEvo:** SDIS 39 (France);
 - **Smartemis:** Service de sécurité incendie de Montréal / SIM (Canada).
 
+Smartemis service discovery is dynamic and is not specific to Montréal, so the same backend is intended to work with French SDIS using the same Smartemis API. **Only SIM has been validated end-to-end so far.** Reads should work where the same API is exposed; the status button is enabled only when that deployment explicitly advertises the target `IND` / `DI1` / `AS1` status. A deployment using different codes or denying writes stays safely read-only.
+
 Other deployments can differ in authentication policy, permissions, status codes, planning rules and exposed operational fields. Compatibility reports are welcome when all personal and operational data is redacted.
+
+## Debug logging
+
+For detailed integration diagnostics:
+
+```yaml
+logger:
+  logs:
+    custom_components.artemis: debug
+```
+
+Smartemis DEBUG logging records protocol method names, server host, HTTP status, latency, centre code, allowed status codes, write/read-back attempts and intervention counts. It deliberately does **not** log raw request/response payloads, `phoneId`, names, addresses, GPS coordinates or intervention contents.
 
 ## Development
 
