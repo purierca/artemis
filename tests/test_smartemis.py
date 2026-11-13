@@ -100,13 +100,13 @@ class SmartemisProtocolTests(unittest.TestCase):
             {
                 1: "existing-phone-id",
                 2: "PERSON",
-                3: "SIM",
+                3: "TEST SERVICE",
                 4: True,
             }
         )
         self.assertEqual(subscriber.phone_id, "existing-phone-id")
         self.assertEqual(subscriber.person_id, "PERSON")
-        self.assertEqual(subscriber.organization, "SIM")
+        self.assertEqual(subscriber.organization, "TEST SERVICE")
 
     def test_update_current_planning_eop_request_matches_apk_struct(self):
         payload = smartemis._request(
