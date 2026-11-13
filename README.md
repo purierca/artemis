@@ -3,11 +3,11 @@
 Unofficial Home Assistant custom integration for **ARTEMIS WebEvo** and the **Smartemis mobile API**.
 
 > [!WARNING]
-> This project is not affiliated with or endorsed by Inetum/Systel, ARTEMIS, Smartemis, any SDIS/SIM, or any emergency-service authority. It must **not** be used as the sole alerting, dispatch or operational-information channel.
+> This project is not affiliated with or endorsed by Inetum/Systel, ARTEMIS, Smartemis, any fire and rescue service, or any emergency-service authority. It must **not** be used as the sole alerting, dispatch or operational-information channel.
 
 ## What it does
 
-Version **0.7.2** keeps the Home Assistant surface deliberately small:
+Version **0.7.3** keeps the Home Assistant surface deliberately small:
 
 | Entity | WebEvo | Smartemis | Purpose |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Version **0.7.2** keeps the Home Assistant surface deliberately small:
 | `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, vehicles, address and GPS |
 | `button.cycle_artemis_status` | yes | yes | `IND -> DI1 -> AS1 -> IND` personal status cycle when the backend advertises those statuses |
 
-Version **0.7.2** reuses the exact Smartemis device identity already registered by the official app and exposes the same status-cycle button on both backends. Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
+Version **0.7.3** reuses the exact Smartemis device identity already registered by the official app and exposes the same status-cycle button on both backends. Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
 
 ## Backends
 
@@ -67,7 +67,7 @@ adb logcat -d | grep -F "PHONE ID GENERATED"
 Do **not** generate a replacement UUID and do not use `adb shell settings get secure android_id` as a substitute. Home Assistant must reuse the exact identifier already registered by Smartemis.
 
 
-The backend has been validated against the **Service de sécurité incendie de Montréal (SIM)** for authentication reuse and read access, including global active interventions, engaged stations/vehicles, vehicle states, addresses and GPS. Smartemis' `default_cs` setting is treated only as the app's default displayed station; personal planning uses the actual affiliated station exposed by the subscriber profile.
+The backend has been validated against a real production Smartemis deployment for authentication reuse and read access, including active interventions, engaged stations/vehicles, vehicle states, addresses and GPS. Smartemis' `default_cs` setting is treated only as the app's default displayed station; personal planning uses the actual affiliated station exposed by the subscriber profile.
 
 #### Smartemis status changes
 
@@ -143,9 +143,7 @@ The recommended setup is the same whether the Smartemis phone is **Android or iP
 18. Home Assistant does **not** call `recordSubscriber` and does **not** create a second Smartemis device identity.
 19. Return to the Home Assistant setup screen.
 20. Home Assistant validates the existing identity and retrieves the available Smartemis service(s).
-21. Choose your fire service, for example:
-    - a French SDIS;
-    - **SIM Montréal**.
+21. Choose the fire and rescue service associated with your Smartemis account.
 22. Home Assistant validates:
     - the subscriber identity;
     - the actual affiliated station;
@@ -406,9 +404,9 @@ Never publish credentials, device identifiers, session cookies, authentication c
 Validated deployments:
 
 - **ARTEMIS WebEvo:** SDIS 39 (France);
-- **Smartemis:** Service de sécurité incendie de Montréal / SIM (Canada).
+- **Smartemis:** validated against a real production Smartemis deployment; identifying deployment details are intentionally omitted.
 
-Smartemis service discovery is dynamic and is not specific to Montréal, so the same backend is intended to work with French SDIS using the same Smartemis API. **Only SIM has been validated end-to-end so far.** Reads should work where the same API is exposed; the status button is enabled only when that deployment explicitly advertises the target `IND` / `DI1` / `AS1` status. A deployment using different codes or denying writes stays safely read-only.
+Smartemis service discovery is dynamic and is not tied to one deployment, so the same backend is intended to work with fire and rescue services exposing the same Smartemis API. One production deployment has been validated end-to-end so far. Reads should work where the same API is exposed; the status button is enabled only when that deployment explicitly advertises the target `IND` / `DI1` / `AS1` status. A deployment using different codes or denying writes stays safely read-only.
 
 Other deployments can differ in authentication policy, permissions, status codes, planning rules and exposed operational fields. Compatibility reports are welcome when all personal and operational data is redacted.
 
