@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented here.
 
+## 0.7.3
+
+### Privacy / documentation
+
+- Remove identifying references to the production Smartemis deployment used during validation.
+- Keep compatibility documentation generic while preserving the same technical validation claims.
+- Replace identifying service names in public test fixtures with neutral placeholders.
+
 ## 0.7.2
 
 ### Documentation
@@ -43,7 +51,7 @@ All notable changes to this project will be documented here.
 
 ### Smartemis
 
-- Promote the Smartemis backend after real-world validation against the Service de sécurité incendie de Montréal (SIM).
+- Promote the Smartemis backend after real-world validation against a production Smartemis deployment.
 - Reuse the exact `phoneId` already registered by the official Smartemis app, allowing Home Assistant and the mobile app to coexist without registering a second device.
 - Resolve the subscriber's real affiliated station instead of the app's default display station.
 - Expose personal planning plus active interventions, engaged stations, vehicles, vehicle states, addresses and GPS through the shared Home Assistant sensors.
@@ -101,7 +109,7 @@ All notable changes to this project will be documented here.
 - Normalize Smartemis personal planning into the existing `sensor.statut_artemis` contract.
 - Normalize Smartemis active interventions into `sensor.interventions_artemis`, including engaged stations, vehicles, vehicle states, addresses, GPS and navigation links.
 - Select the subscriber's own Smartemis centre from user context, with a deterministic fallback for deployments exposing many centres.
-- Validate the Smartemis backend end-to-end against the Service de sécurité incendie de Montréal (SIM).
+- Validate the Smartemis backend end-to-end against a production Smartemis deployment.
 
 ### Changed
 
