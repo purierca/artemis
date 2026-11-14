@@ -292,6 +292,9 @@ class OperationTests(unittest.TestCase):
             "dateCreation": "2026-09-30T11:43:00",
             "disasterLabel": "SECOURS A PERSONNE",
             "state": {"code": "EC", "name": "EN COURS"},
+            "stationName": "CASERNE 08",
+            "stationReceiverName": "CTA",
+            "grpRadio": "G.04",
             "address": {
                 "city": "BEAUFORT",
                 "streetNumber": "12",
@@ -303,15 +306,16 @@ class OperationTests(unittest.TestCase):
             },
             "fireUnits": [
                 {
-                    "id": "BEA",
-                    "shortname": "BEAUF",
+                    "id": "08",
+                    "name": "CASERNE 08",
+                    "shortname": "CA08",
                     "state": {"code": "PA", "name": "PARTI"},
                 }
             ],
             "vehicles": [
                 {
                     "name": "VLTU 01",
-                    "ownerFireUnit": {"id": "BEA"},
+                    "ownerFireUnit": {"id": "08"},
                     "state": {"code": "PA", "name": "PARTI"},
                 }
             ],
@@ -321,7 +325,13 @@ class OperationTests(unittest.TestCase):
         self.assertEqual(data["title"], "SECOURS A PERSONNE")
         self.assertEqual(data["state_code"], "EC")
         self.assertEqual(data["state_name"], "EN COURS")
-        self.assertEqual(data["vehicles"][0]["center"], "BEAUF")
+        self.assertEqual(data["vehicles"][0]["center"], "CA08")
+        self.assertEqual(data["communication_group"], "G.04")
+        self.assertEqual(data["station_name"], "CASERNE 08")
+        self.assertEqual(data["station_receiver_name"], "CTA")
+        self.assertEqual(data["centers"][0]["id"], "08")
+        self.assertEqual(data["centers"][0]["name"], "CASERNE 08")
+        self.assertEqual(data["centers"][0]["short_name"], "CA08")
         self.assertEqual(data["vehicles"][0]["name"], "VLTU 01")
         self.assertEqual(data["vehicles"][0]["state_code"], "PA")
         self.assertEqual(data["latitude"], 46.575123)
