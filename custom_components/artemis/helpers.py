@@ -682,6 +682,33 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
 
     vehicles.sort(key=lambda item: (item["center"], item["name"]))
 
+    centers: list[dict[str, str]] = []
+    for unit in operation.get("fireUnits") or []:
+        if not isinstance(unit, dict):
+            continue
+        unit_state_code, unit_state_name = _state_parts(unit)
+        centers.append(
+            {
+                "id": str(unit.get("id") or ""),
+                "name": str(unit.get("name") or "").strip(),
+                "short_name": str(
+                    unit.get("shortname") or unit.get("shortName") or ""
+                ).strip(),
+                "state_code": unit_state_code,
+                "state_name": unit_state_name,
+            }
+        )
+    centers.sort(key=lambda item: (item["short_name"], item["name"], item["id"]))
+
+    communication_group = str(
+        operation.get("grpRadio")
+        or operation.get("communicationGroup")
+        or operation.get("radioGroup")
+        or ""
+    ).strip()
+    station_name = str(operation.get("stationName") or "").strip()
+    station_receiver_name = str(operation.get("stationReceiverName") or "").strip()
+
     created = (
         operation.get("dateStartRdv")
         if operation.get("typeCode") == "D1"
@@ -699,5 +726,9 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
         "navigation_uri": navigation_uri(latitude, longitude, address),
         "state_code": state_code,
         "state_name": state_name,
+        "communication_group": communication_group,
+        "station_name": station_name,
+        "station_receiver_name": station_receiver_name,
+        "centers": centers,
         "vehicles": vehicles,
     }
