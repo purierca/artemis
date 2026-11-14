@@ -392,6 +392,17 @@ def _operation_snapshot(
     ]
     vehicles.sort(key=lambda item: (item["center"], item["name"]))
 
+    centers = [
+        {
+            "id": str(center.get("id") or ""),
+            "name": str(center.get("name") or ""),
+            "dispatch_number": center.get("dispatch_number"),
+        }
+        for center in (detail.get("centers") or ())
+        if isinstance(center, dict)
+    ]
+    centers.sort(key=lambda item: (item["name"], item["id"]))
+
     operation_id = str(summary.get("id") or summary.get("number") or "unknown")
     return {
         "id": operation_id,
@@ -404,5 +415,9 @@ def _operation_snapshot(
         "navigation_uri": navigation_uri(latitude, longitude, address),
         "state_code": "",
         "state_name": "",
+        "communication_group": str(summary.get("communication_group") or "").strip(),
+        "station_name": "",
+        "station_receiver_name": "",
+        "centers": centers,
         "vehicles": vehicles,
     }
