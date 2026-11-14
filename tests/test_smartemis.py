@@ -224,23 +224,70 @@ class SmartemisProtocolTests(unittest.TestCase):
         self.assertEqual(result["allowed_statuses"][0]["code"], "IND")
         self.assertEqual(result["available_personnel"], 4)
 
+    def test_intervention_summary_decodes_all_itv_fields(self):
+        result = smartemis._normalize_intervention(
+            {
+                1: 42,
+                2: "26000042",
+                3: "SECOURS A PERSONNE",
+                4: "ADDRESS",
+                5: {1: "2026-11-14T20:00:00.0+0100"},
+                6: "ITV",
+                7: "icon.svg",
+                8: 2,
+                9: 1,
+                10: 5,
+                11: "G.04",
+            }
+        )
+        self.assertEqual(result["id"], 42)
+        self.assertEqual(result["communication_group"], "G.04")
+        self.assertEqual(result["resource_count"], 2)
+        self.assertEqual(result["address_count"], 1)
+        self.assertEqual(result["person_count"], 5)
+
     def test_intervention_detail_normalization(self):
         result = smartemis._normalize_intervention_detail(
             {
                 2: {
                     1: [
                         {
-                            3: "78",
-                            4: "CA78",
-                            5: [{3: 278, 4: "278", 5: "RDC"}],
+                            2: 1,
+                            3: "08",
+                            4: "CA08",
+                            5: [
+                                {
+                                    3: 278,
+                                    4: "278",
+                                    5: "RDC",
+                                    6: "00FF00",
+                                    7: "000000",
+                                }
+                            ],
+                        }
+                    ],
+                    2: [
+                        {
+                            2: "POL",
+                            3: "POLICE",
+                            4: "https://example.invalid/",
+                            5: "ENG",
+                            6: "FFFFFF",
+                            7: "000000",
                         }
                     ],
                     3: [{1: "IT", 2: "ADDRESS", 3: "-73.5", 4: "45.5"}],
                 }
             }
         )
-        self.assertEqual(result["vehicles"][0]["center_name"], "CA78")
+        self.assertEqual(result["centers"][0]["id"], "08")
+        self.assertEqual(result["centers"][0]["name"], "CA08")
+        self.assertEqual(result["centers"][0]["dispatch_number"], 1)
+        self.assertEqual(result["vehicles"][0]["center_name"], "CA08")
         self.assertEqual(result["vehicles"][0]["state_code"], "RDC")
+        self.assertEqual(result["vehicles"][0]["state_background"], "00FF00")
+        self.assertEqual(result["external_services"][0]["code"], "POL")
+        self.assertEqual(result["external_services"][0]["state_code"], "ENG")
         self.assertEqual(result["addresses"][0]["longitude"], "-73.5")
         self.assertEqual(result["addresses"][0]["latitude"], "45.5")
 
