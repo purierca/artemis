@@ -306,22 +306,43 @@ def _normalize_current_planning(response: dict[int, Any]) -> dict[str, Any]:
 
 
 def _normalize_intervention(value: dict[int, Any]) -> dict[str, Any]:
+    """Decode every field exposed by the Smartemis Itv Thrift struct."""
+
     return {
         "id": value.get(1),
         "number": value.get(2),
         "title": value.get(3),
         "address": value.get(4),
         "created": _artemis_date(value.get(5)),
+        "type_code": value.get(6),
+        "url": value.get(7),
+        "resource_count": value.get(8),
+        "address_count": value.get(9),
+        "person_count": value.get(10),
+        "communication_group": value.get(11),
     }
 
 
 def _normalize_intervention_detail(response: dict[int, Any]) -> dict[str, Any]:
+    """Decode every field exposed by the Smartemis ItvDetail Thrift struct."""
+
     detail = response.get(2) if isinstance(response.get(2), dict) else {}
+    centers = tuple(
+        {
+            "dispatch_number": unit.get(2),
+            "id": unit.get(3),
+            "name": unit.get(4),
+        }
+        for unit in (detail.get(1) or [])
+        if isinstance(unit, dict)
+    )
     vehicles = tuple(
         {
             "id": vehicle.get(3),
             "name": vehicle.get(4),
             "state_code": vehicle.get(5),
+            "state_background": vehicle.get(6),
+            "state_foreground": vehicle.get(7),
             "center_id": unit.get(3),
             "center_name": unit.get(4),
         }
@@ -329,6 +350,18 @@ def _normalize_intervention_detail(response: dict[int, Any]) -> dict[str, Any]:
         if isinstance(unit, dict)
         for vehicle in (unit.get(5) or [])
         if isinstance(vehicle, dict)
+    )
+    external_services = tuple(
+        {
+            "code": service.get(2),
+            "name": service.get(3),
+            "url": service.get(4),
+            "state_code": service.get(5),
+            "state_background": service.get(6),
+            "state_foreground": service.get(7),
+        }
+        for service in (detail.get(2) or [])
+        if isinstance(service, dict)
     )
     addresses = tuple(
         {
@@ -340,7 +373,12 @@ def _normalize_intervention_detail(response: dict[int, Any]) -> dict[str, Any]:
         for address in (detail.get(3) or [])
         if isinstance(address, dict)
     )
-    return {"vehicles": vehicles, "addresses": addresses}
+    return {
+        "centers": centers,
+        "vehicles": vehicles,
+        "external_services": external_services,
+        "addresses": addresses,
+    }
 
 
 def _update_current_planning_fields(
