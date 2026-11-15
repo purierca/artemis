@@ -16,6 +16,10 @@ CONF_PASSWORD = "password"
 CONF_SMARTEMIS_SERVER = "smartemis_server"
 CONF_SMARTEMIS_PHONE_ID = "smartemis_phone_id"
 
+CONF_GEOCODE_ADDRESSES = "geocode_addresses"
+DEFAULT_GEOCODE_ADDRESSES = False
+
+
 DEFAULT_HOST = "https://artemisweb.sdis39.fr"
 DEFAULT_CAS_SERVICE = "https://artemis/artemis-web"
 
