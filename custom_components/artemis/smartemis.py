@@ -18,6 +18,7 @@ RESULT_OK = 0
 BOUNDARY_END_OF_PERIOD = "EOP"
 
 RIGHT_PARAMETERS = "SMART:FCT:PARAM"
+RIGHT_INTERVENTION_HISTORY = "SMART:ITV:HIST"
 YES = "O"
 THRIFT_NULL = "null"
 
@@ -381,6 +382,21 @@ def _normalize_intervention_detail(response: dict[int, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_intervention_history(
+    response: dict[int, Any],
+) -> tuple[dict[str, Any], ...]:
+    """Decode Smartemis HistItv entries."""
+
+    return tuple(
+        {
+            "date": _artemis_date(item.get(1)),
+            "text": str(item.get(2) or "").strip(),
+        }
+        for item in (response.get(2) or [])
+        if isinstance(item, dict)
+    )
+
+
 def _update_current_planning_fields(
     *,
     phone_id: str,
@@ -695,6 +711,30 @@ class SmartemisApi:
             for item in (response.get(2) or [])
             if isinstance(item, dict)
         )
+
+    async def async_get_intervention_history(
+        self,
+        url: str,
+        *,
+        phone_id: str,
+        center_id: str,
+        matricule: str,
+        intervention_id: int,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return the Smartemis chronology for one intervention."""
+
+        response = await self._call(
+            url,
+            "getHistItv",
+            {
+                1: _scalar("str", phone_id),
+                2: _scalar("str", center_id),
+                3: _scalar("str", matricule),
+                4: _scalar("i32", intervention_id),
+            },
+        )
+        _ensure_success(response)
+        return _normalize_intervention_history(response)
 
     async def async_get_intervention_detail(
         self,
