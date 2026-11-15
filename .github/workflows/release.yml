@@ -31,13 +31,39 @@ jobs:
           VERSION="$(python3 -c 'import json; print(json.load(open("custom_components/artemis/manifest.json", encoding="utf-8"))["version"])')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Publish GitHub release if missing
+      - name: Publish or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
           TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
+          NOTES_FILE="$(mktemp)"
+
+          python3 - "$VERSION" "$NOTES_FILE" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          version = sys.argv[1]
+          output = Path(sys.argv[2])
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+          match = re.search(
+              rf"^## {re.escape(version)}\\s*\\n(?P<body>.*?)(?=^## |\\Z)",
+              changelog,
+              flags=re.MULTILINE | re.DOTALL,
+          )
+          if match is None:
+              raise SystemExit(f"CHANGELOG.md has no section for {version}")
+
+          notes = match.group("body").strip()
+          if not notes:
+              raise SystemExit(f"CHANGELOG.md section for {version} is empty")
+
+          output.write_text(notes + "\\n", encoding="utf-8")
+          PY
+
           if gh release view "$VERSION" >/dev/null 2>&1; then
             if [ "$VERSION" = "0.7.0" ]; then
               CURRENT_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" --jq '.object.sha')"
@@ -50,11 +76,15 @@ jobs:
                 echo "Retargeted release $VERSION from $CURRENT_SHA to $TARGET_SHA."
               fi
             fi
-            echo "Release $VERSION already exists."
+
+            gh release edit "$VERSION" \
+              --title "ARTEMIS / Smartemis $VERSION" \
+              --notes-file "$NOTES_FILE"
+            echo "Updated release notes for $VERSION from CHANGELOG.md."
             exit 0
           fi
 
           gh release create "$VERSION" \
             --target "$TARGET_SHA" \
             --title "ARTEMIS / Smartemis $VERSION" \
-            --generate-notes
+            --notes-file "$NOTES_FILE"
