@@ -295,6 +295,8 @@ class OperationTests(unittest.TestCase):
             "stationName": "CASERNE 08",
             "stationReceiverName": "CTA",
             "grpRadio": "G.04",
+            "typeCode": "ITV",
+            "personCount": 3,
             "address": {
                 "city": "BEAUFORT",
                 "streetNumber": "12",
@@ -319,6 +321,13 @@ class OperationTests(unittest.TestCase):
                     "state": {"code": "PA", "name": "PARTI"},
                 }
             ],
+            "externalServices": [
+                {
+                    "id": "POL",
+                    "name": "POLICE",
+                    "state": {"code": "ENG", "name": "ENGAGE"},
+                }
+            ],
         }
         data = helpers.operation_snapshot_data(operation)
         self.assertEqual(data["id"], "42")
@@ -326,12 +335,18 @@ class OperationTests(unittest.TestCase):
         self.assertEqual(data["state_code"], "EC")
         self.assertEqual(data["state_name"], "EN COURS")
         self.assertEqual(data["vehicles"][0]["center"], "CA08")
+        self.assertEqual(data["type_code"], "ITV")
+        self.assertEqual(data["resource_count"], 1)
+        self.assertEqual(data["person_count"], 3)
         self.assertEqual(data["communication_group"], "G.04")
         self.assertEqual(data["station_name"], "CASERNE 08")
         self.assertEqual(data["station_receiver_name"], "CTA")
         self.assertEqual(data["centers"][0]["id"], "08")
         self.assertEqual(data["centers"][0]["name"], "CASERNE 08")
         self.assertEqual(data["centers"][0]["short_name"], "CA08")
+        self.assertEqual(data["external_services"][0]["id"], "POL")
+        self.assertEqual(data["external_services"][0]["state_code"], "ENG")
+        self.assertEqual(data["history"], [])
         self.assertEqual(data["vehicles"][0]["name"], "VLTU 01")
         self.assertEqual(data["vehicles"][0]["state_code"], "PA")
         self.assertEqual(data["latitude"], 46.575123)
@@ -342,6 +357,47 @@ class OperationTests(unittest.TestCase):
         )
         self.assertNotIn("message", data)
         self.assertNotIn("lifecycle", data)
+
+    def test_intervention_archive_tracks_new_update_and_end(self) -> None:
+        records = {}
+        operation = {
+            "id": "42",
+            "number": "26000042",
+            "created": "2026-11-15T12:00:00+01:00",
+            "title": "TEST",
+            "latitude": 46.5,
+            "longitude": 5.4,
+            "type_code": "ITV",
+        }
+
+        changed, new = helpers.merge_intervention_archive(
+            records,
+            [operation],
+            "2026-11-15T11:00:00+00:00",
+        )
+        key = helpers.intervention_archive_key(operation)
+        self.assertEqual(changed, {key})
+        self.assertEqual(new, {key})
+        self.assertTrue(records[key]["active"])
+        self.assertIsNone(records[key]["ended"])
+
+        changed, new = helpers.merge_intervention_archive(
+            records,
+            [operation],
+            "2026-11-15T11:01:00+00:00",
+        )
+        self.assertEqual(changed, set())
+        self.assertEqual(new, set())
+
+        changed, new = helpers.merge_intervention_archive(
+            records,
+            [],
+            "2026-11-15T11:02:00+00:00",
+        )
+        self.assertEqual(changed, {key})
+        self.assertEqual(new, set())
+        self.assertFalse(records[key]["active"])
+        self.assertEqual(records[key]["ended"], "2026-11-15T11:02:00+00:00")
 
     def test_navigation_falls_back_to_address_when_no_gps(self) -> None:
         operation = {
