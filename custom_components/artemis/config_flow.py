@@ -11,6 +11,7 @@ import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
 
@@ -20,12 +21,14 @@ from .const import (
     BACKEND_WEBEVO,
     CONF_BACKEND,
     CONF_CAS_SERVICE,
+    CONF_GEOCODE_ADDRESSES,
     CONF_HOST,
     CONF_PASSWORD,
     CONF_SMARTEMIS_PHONE_ID,
     CONF_SMARTEMIS_SERVER,
     CONF_USERNAME,
     DEFAULT_CAS_SERVICE,
+    DEFAULT_GEOCODE_ADDRESSES,
     DEFAULT_HOST,
     DOMAIN,
 )
@@ -75,6 +78,15 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure one ARTEMIS backend."""
 
     VERSION = 3
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Return the ARTEMIS options flow."""
+
+        return ArtemisOptionsFlow()
 
     def _smartemis_api(self) -> SmartemisApi:
         return SmartemisApi(async_get_clientsession(self.hass))
@@ -446,3 +458,31 @@ class ArtemisConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+class ArtemisOptionsFlow(config_entries.OptionsFlow):
+    """Configure optional ARTEMIS behavior."""
+
+    async def async_step_init(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Manage ARTEMIS options."""
+
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_GEOCODE_ADDRESSES,
+                        default=self.config_entry.options.get(
+                            CONF_GEOCODE_ADDRESSES,
+                            DEFAULT_GEOCODE_ADDRESSES,
+                        ),
+                    ): bool
+                }
+            ),
+        )
+
