@@ -709,11 +709,30 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
     station_name = str(operation.get("stationName") or "").strip()
     station_receiver_name = str(operation.get("stationReceiverName") or "").strip()
 
+    external_services: list[dict[str, Any]] = []
+    for service in operation.get("externalServices") or []:
+        if not isinstance(service, dict):
+            continue
+        service_state_code, service_state_name = _state_parts(service)
+        external_services.append(
+            {
+                "id": str(service.get("id") or service.get("code") or ""),
+                "name": str(service.get("name") or "").strip(),
+                "state_code": service_state_code,
+                "state_name": service_state_name,
+            }
+        )
+    external_services.sort(key=lambda item: (item["name"], item["id"]))
+
     created = (
         operation.get("dateStartRdv")
         if operation.get("typeCode") == "D1"
         else operation.get("dateCreation")
     )
+
+    person_count = operation.get("personCount")
+    if person_count is None:
+        person_count = operation.get("nbPers")
 
     return {
         "id": operation_id,
@@ -726,9 +745,90 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
         "navigation_uri": navigation_uri(latitude, longitude, address),
         "state_code": state_code,
         "state_name": state_name,
+        "type_code": operation.get("typeCode"),
+        "resource_count": len(vehicles),
+        "person_count": person_count,
         "communication_group": communication_group,
         "station_name": station_name,
         "station_receiver_name": station_receiver_name,
         "centers": centers,
         "vehicles": vehicles,
+        "external_services": external_services,
+        "history": [],
     }
+
+
+_ARCHIVE_META_KEYS = {"active", "first_seen", "last_seen", "ended"}
+
+
+def intervention_archive_key(operation: dict[str, Any]) -> str:
+    """Return a stable archive key without assuming operation ids are eternal."""
+
+    operation_id = str(
+        operation.get("id") or operation.get("number") or "unknown"
+    ).strip()
+    created = str(operation.get("created") or "").strip()
+    return f"{operation_id}|{created}" if created else operation_id
+
+
+def merge_intervention_archive(
+    records: dict[str, dict[str, Any]],
+    operations: Iterable[dict[str, Any]],
+    observed_at: str,
+) -> tuple[set[str], set[str]]:
+    """Merge an active snapshot into a persistent intervention archive.
+
+    Returns (changed_keys, new_keys). Metadata changes only when the normalized
+    intervention payload changes or when an intervention becomes inactive, so
+    routine polling does not create needless recorder/storage churn.
+    """
+
+    changed: set[str] = set()
+    new: set[str] = set()
+    active_keys: set[str] = set()
+
+    for operation in operations:
+        key = intervention_archive_key(operation)
+        active_keys.add(key)
+        previous = records.get(key)
+        first_seen = (
+            str(previous.get("first_seen"))
+            if previous and previous.get("first_seen")
+            else observed_at
+        )
+        previous_payload = (
+            {
+                name: value
+                for name, value in previous.items()
+                if name not in _ARCHIVE_META_KEYS
+            }
+            if previous
+            else None
+        )
+        payload_changed = previous_payload != operation
+        became_active = previous is not None and not bool(previous.get("active"))
+
+        if previous is None or payload_changed or became_active:
+            records[key] = {
+                **operation,
+                "active": True,
+                "first_seen": first_seen,
+                "last_seen": observed_at,
+                "ended": None,
+            }
+            changed.add(key)
+            if previous is None:
+                new.add(key)
+
+    for key, previous in tuple(records.items()):
+        if key in active_keys or not bool(previous.get("active")):
+            continue
+        records[key] = {
+            **previous,
+            "active": False,
+            "ended": observed_at,
+        }
+        changed.add(key)
+
+    return changed, new
+
