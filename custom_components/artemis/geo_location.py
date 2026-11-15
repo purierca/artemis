@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.geo_location import GeolocationEvent
@@ -18,7 +18,7 @@ from homeassistant.util.location import distance
 
 from . import ArtemisRuntimeData
 from .const import DOMAIN
-from .helpers import merge_intervention_archive
+from .helpers import merge_intervention_archive, navigation_uri
 from .models import OperationsSnapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -97,6 +97,7 @@ class ArtemisInterventionHistoryManager:
             }
 
         await self._async_ingest_snapshot(self.runtime.operations.data)
+        await self._async_repair_recent_missing_coordinates()
 
         entities = []
         for key, record in self._records.items():
@@ -112,6 +113,66 @@ class ArtemisInterventionHistoryManager:
             "storage=local phone_id_logged=false operational_payload_logged=false",
             len(self._records),
             sum(1 for record in self._records.values() if record.get("active")),
+        )
+
+    async def _async_repair_recent_missing_coordinates(self) -> None:
+        """Best-effort repair for recent Smartemis archive entries missing GPS."""
+
+        recover = getattr(self.runtime.operations, "async_recover_coordinates", None)
+        if recover is None:
+            return
+
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        for key, record in self._records.items():
+            if record.get("latitude") is not None and record.get("longitude") is not None:
+                continue
+            if record.get("active"):
+                continue
+
+            ended_raw = record.get("ended") or record.get("last_seen")
+            if not ended_raw:
+                continue
+            try:
+                ended = datetime.fromisoformat(str(ended_raw).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if ended.tzinfo is None:
+                ended = ended.replace(tzinfo=UTC)
+            if ended < cutoff:
+                continue
+
+            candidates.append((key, record))
+
+        repaired = 0
+        for key, record in candidates[:5]:
+            try:
+                intervention_id = int(record.get("id"))
+            except (TypeError, ValueError):
+                continue
+
+            latitude, longitude = await recover(intervention_id)
+            if latitude is None or longitude is None:
+                continue
+
+            record["latitude"] = latitude
+            record["longitude"] = longitude
+            record["navigation_uri"] = navigation_uri(
+                latitude,
+                longitude,
+                str(record.get("address") or ""),
+            )
+            self._records[key] = record
+            repaired += 1
+
+        if repaired:
+            await self._store.async_save({"interventions": self._records})
+
+        _LOGGER.debug(
+            "ARTEMIS archived GPS recovery candidates=%s repaired=%s "
+            "operational_payload_logged=false",
+            min(len(candidates), 5),
+            repaired,
         )
 
     @callback
