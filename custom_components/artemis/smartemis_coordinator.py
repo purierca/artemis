@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -17,6 +18,7 @@ from .const import SMARTEMIS_UPDATE_INTERVAL
 from .helpers import coerce_coordinate, cycle_status_code, navigation_uri
 from .models import OperationsSnapshot, PlanningSnapshot, StatusValue
 from .smartemis import (
+    RIGHT_INTERVENTION_HISTORY,
     RIGHT_PARAMETERS,
     YES,
     SmartemisApi,
@@ -300,6 +302,9 @@ class SmartemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
         self.phone_id = phone_id
         self.center = center
         self.context = context
+        self._history_cache: dict[
+            int, tuple[float, tuple[dict[str, Any], ...]]
+        ] = {}
 
     async def _async_update_data(self) -> OperationsSnapshot:
         global_view = (
@@ -329,6 +334,8 @@ class SmartemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
         operations = []
         detail_success = 0
         detail_failure = 0
+        history_success = 0
+        history_failure = 0
         for summary in summaries:
             detail: dict[str, Any] = {}
             try:
@@ -336,6 +343,7 @@ class SmartemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
             except (TypeError, ValueError):
                 intervention_id = None
 
+            history: tuple[dict[str, Any], ...] = ()
             if intervention_id is not None:
                 try:
                     detail = await self.api.async_get_intervention_detail(
@@ -353,15 +361,50 @@ class SmartemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
                         type(err).__name__,
                     )
 
-            operations.append(_operation_snapshot(summary, detail))
+                if RIGHT_INTERVENTION_HISTORY in self.center.rights:
+                    cached = self._history_cache.get(intervention_id)
+                    now_monotonic = monotonic()
+                    if cached and now_monotonic - cached[0] < 300:
+                        history = cached[1]
+                    else:
+                        try:
+                            history = await self.api.async_get_intervention_history(
+                                self.server,
+                                phone_id=self.phone_id,
+                                center_id=self.center.id,
+                                matricule=self.center.matricule,
+                                intervention_id=intervention_id,
+                            )
+                            self._history_cache[intervention_id] = (
+                                now_monotonic,
+                                history,
+                            )
+                            history_success += 1
+                        except (
+                            SmartemisConnectionError,
+                            SmartemisServiceError,
+                        ) as err:
+                            history_failure += 1
+                            if cached:
+                                history = cached[1]
+                            _LOGGER.debug(
+                                "Smartemis intervention history unavailable "
+                                "error_type=%s",
+                                type(err).__name__,
+                            )
+
+            operations.append(_operation_snapshot(summary, detail, history))
 
         operations.sort(key=lambda item: item["id"])
         _LOGGER.debug(
             "Smartemis interventions refresh complete active=%s details_ok=%s "
-            "details_failed=%s operational_payload_logged=false",
+            "details_failed=%s history_ok=%s history_failed=%s "
+            "operational_payload_logged=false",
             len(operations),
             detail_success,
             detail_failure,
+            history_success,
+            history_failure,
         )
         return OperationsSnapshot(count=len(operations), operations=tuple(operations))
 
@@ -369,6 +412,7 @@ class SmartemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
 def _operation_snapshot(
     summary: dict[str, Any],
     detail: dict[str, Any],
+    history: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
     addresses = detail.get("addresses") or ()
     first_address = addresses[0] if addresses else {}
@@ -403,6 +447,18 @@ def _operation_snapshot(
     ]
     centers.sort(key=lambda item: (item["name"], item["id"]))
 
+    external_services = [
+        {
+            "code": str(service.get("code") or ""),
+            "name": str(service.get("name") or ""),
+            "url": str(service.get("url") or ""),
+            "state_code": str(service.get("state_code") or ""),
+        }
+        for service in (detail.get("external_services") or ())
+        if isinstance(service, dict)
+    ]
+    external_services.sort(key=lambda item: (item["name"], item["code"]))
+
     operation_id = str(summary.get("id") or summary.get("number") or "unknown")
     return {
         "id": operation_id,
@@ -415,9 +471,18 @@ def _operation_snapshot(
         "navigation_uri": navigation_uri(latitude, longitude, address),
         "state_code": "",
         "state_name": "",
+        "type_code": summary.get("type_code"),
+        "resource_count": (
+            summary.get("resource_count")
+            if summary.get("resource_count") is not None
+            else len(vehicles)
+        ),
+        "person_count": summary.get("person_count"),
         "communication_group": str(summary.get("communication_group") or "").strip(),
         "station_name": "",
         "station_receiver_name": "",
         "centers": centers,
         "vehicles": vehicles,
+        "external_services": external_services,
+        "history": list(history),
     }
