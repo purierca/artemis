@@ -7,15 +7,16 @@ Unofficial Home Assistant custom integration for **ARTEMIS WebEvo** and the **Sm
 
 ## What it does
 
-Version **0.7.3** keeps the Home Assistant surface deliberately small:
+Version **0.8.0** keeps the Home Assistant surface deliberately small:
 
 | Entity | WebEvo | Smartemis | Purpose |
 | --- | --- | --- | --- |
 | `sensor.statut_artemis` | yes | yes | Personal status, next planned change and available-personnel count when exposed |
-| `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, vehicles, address and GPS |
+| `sensor.interventions_artemis` | yes | yes | Active-intervention count + structured interventions, centres, resources, radio group, external services, address/GPS and Smartemis chronology when available |
+| `geo_location.artemis_*` | yes | yes | Local persistent archive: one geolocation event per intervention observed by this Home Assistant instance |
 | `button.cycle_artemis_status` | yes | yes | `IND -> DI1 -> AS1 -> IND` personal status cycle when the backend advertises those statuses |
 
-Version **0.7.3** reuses the exact Smartemis device identity already registered by the official app and exposes the same status-cycle button on both backends. Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
+Version **0.8.0** reuses the exact Smartemis device identity already registered by the official app and exposes the same status-cycle button on both backends. Home Assistant does **not** register a second Smartemis device. Existing WebEvo installations are unaffected.
 
 ## Backends
 
@@ -83,6 +84,52 @@ IND -> DI1 -> AS1 -> IND
 
 If a Smartemis deployment does not expose one of those status codes or does not grant write rights, the button is unavailable rather than forcing a write.
 
+
+## Intervention data and local history
+
+`sensor.interventions_artemis` remains the live active-intervention snapshot. Each normalized intervention can now include:
+
+- `id`, `number`, `title`, `created`, `type_code`;
+- `address`, `latitude`, `longitude`, `navigation_uri`;
+- `resource_count`, `person_count`;
+- `communication_group`;
+- `centers[]`, `vehicles[]`, `external_services[]`;
+- `history[]` when the backend exposes an intervention chronology.
+
+Smartemis maps these fields from the official app protocol, including `grpRadio`, engaged centres/services and `getHistItv`. WebEvo exposes the same normalized structure where equivalent fields exist; missing fields are left empty/null instead of being inferred.
+
+### Historical map
+
+Version 0.8.0 adds a separate Home Assistant **geolocation source** named `artemis`. This deliberately avoids adding another history sensor.
+
+Every intervention first observed by Home Assistant is copied into a local archive and retained after it disappears from the live synoptic. The archive stores only normalized intervention data in Home Assistant's local `.storage`; the integration does not upload or synchronize this archive anywhere.
+
+Each archived intervention is exposed as `geo_location.artemis_*` with attributes such as:
+
+- `active`, `first_seen`, `last_seen`, `ended`;
+- `type_code`, `resource_count`, `person_count`;
+- `communication_group`;
+- `centers`, `vehicles`, `external_services`, `history`;
+- the intervention title/number/address and navigation metadata.
+
+Interventions with coordinates appear directly on a Home Assistant Map card. Interventions without coordinates are still retained locally but cannot be drawn on a map.
+
+Example:
+
+```yaml
+type: map
+title: ARTEMIS intervention history
+geo_location_sources:
+  - source: artemis
+    label_mode: attribute
+    attribute: type_code
+auto_fit: true
+cluster: true
+```
+
+The `artemis` geolocation source can also be used by native geolocation automations. Its attributes make it possible to filter reactions by intervention type, active/ended state, radio group, centre, etc.
+
+The archive starts when this version is installed; it cannot reconstruct interventions that Home Assistant never observed. It survives Home Assistant restarts and is deleted automatically if the ARTEMIS / Smartemis integration entry is removed.
 
 ## Polling architecture
 
