@@ -358,6 +358,28 @@ class OperationTests(unittest.TestCase):
         self.assertNotIn("message", data)
         self.assertNotIn("lifecycle", data)
 
+    def test_operation_coordinates_scan_all_smartemis_addresses(self) -> None:
+        latitude, longitude = helpers.operation_coordinates(
+            {
+                "addresses": (
+                    {
+                        "type": "IT",
+                        "address": "SAINT-AMOUR - 22 RUE DE BRESSE",
+                        "latitude": None,
+                        "longitude": None,
+                    },
+                    {
+                        "type": "GPS",
+                        "address": "",
+                        "latitude": "46.43625",
+                        "longitude": "5.34492",
+                    },
+                )
+            }
+        )
+        self.assertEqual(latitude, 46.43625)
+        self.assertEqual(longitude, 5.34492)
+
     def test_intervention_archive_tracks_new_update_and_end(self) -> None:
         records = {}
         operation = {
