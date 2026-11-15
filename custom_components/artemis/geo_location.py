@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.components.geo_location import GeolocationEvent
@@ -114,7 +114,7 @@ class ArtemisInterventionHistoryManager:
         snapshot: OperationsSnapshot | None,
     ) -> None:
         operations = snapshot.operations if snapshot is not None else ()
-        observed_at = datetime.now(timezone.utc).isoformat()
+        observed_at = datetime.now(UTC).isoformat()
 
         async with self._lock:
             changed, new = merge_intervention_archive(
