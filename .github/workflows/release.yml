@@ -42,22 +42,23 @@ jobs:
 
           python3 - "$VERSION" "$NOTES_FILE" <<'PY'
           from pathlib import Path
-          import re
           import sys
 
           version = sys.argv[1]
           output = Path(sys.argv[2])
-          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          lines = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+          heading = f"## {version}"
 
-          match = re.search(
-              rf"^## {re.escape(version)}\\s*\\n(?P<body>.*?)(?=^## |\\Z)",
-              changelog,
-              flags=re.MULTILINE | re.DOTALL,
+          try:
+              start = lines.index(heading) + 1
+          except ValueError as err:
+              raise SystemExit(f"CHANGELOG.md has no section for {version}") from err
+
+          end = next(
+              (index for index in range(start, len(lines)) if lines[index].startswith("## ")),
+              len(lines),
           )
-          if match is None:
-              raise SystemExit(f"CHANGELOG.md has no section for {version}")
-
-          notes = match.group("body").strip()
+          notes = "\\n".join(lines[start:end]).strip()
           if not notes:
               raise SystemExit(f"CHANGELOG.md section for {version} is empty")
 
