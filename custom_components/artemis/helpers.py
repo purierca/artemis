@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import re
 from datetime import date, datetime, time, timedelta
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote_plus
 from zoneinfo import ZoneInfo
 
 from .const import STATUS_CYCLE
@@ -504,6 +505,31 @@ def coerce_coordinate(value: Any, *, latitude: bool) -> float | None:
     return None
 
 
+_URL_COORDINATE_RE = re.compile(
+    r"(?<![0-9.])(-?[0-9]{1,2}(?:\\.[0-9]+)?),\\s*(-?[0-9]{1,3}(?:\\.[0-9]+)?)(?![0-9.])"
+)
+
+
+def navigation_url_coordinates(value: Any) -> tuple[float | None, float | None]:
+    """Extract WGS84 coordinates embedded in a navigation URL without geocoding."""
+
+    if not isinstance(value, str) or not value.strip():
+        return None, None
+
+    decoded = unquote_plus(value.strip())
+    for match in _URL_COORDINATE_RE.finditer(decoded):
+        latitude = coerce_coordinate(match.group(1), latitude=True)
+        longitude = coerce_coordinate(match.group(2), latitude=False)
+        if (
+            latitude is not None
+            and longitude is not None
+            and not (latitude == 0 and longitude == 0)
+        ):
+            return latitude, longitude
+
+    return None, None
+
+
 def operation_coordinates(
     operation: dict[str, Any],
 ) -> tuple[float | None, float | None]:
@@ -563,6 +589,11 @@ def operation_coordinates(
 
     for candidate in candidates:
         latitude, longitude = pair_from_dict(candidate)
+        if latitude is not None and longitude is not None:
+            return latitude, longitude
+
+    for key in ("url", "navigation_uri", "navigationUrl", "mapUrl", "map_url"):
+        latitude, longitude = navigation_url_coordinates(operation.get(key))
         if latitude is not None and longitude is not None:
             return latitude, longitude
 
