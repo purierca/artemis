@@ -6,25 +6,38 @@ import asyncio
 import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
+
+import aiohttp
 from typing import Any
 
 from homeassistant.components.geo_location import GeolocationEvent
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfLength
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.storage import Store
 from homeassistant.util.location import distance
 
 from . import ArtemisRuntimeData
-from .const import DOMAIN
-from .helpers import merge_intervention_archive, navigation_uri
+from .const import (
+    CONF_GEOCODE_ADDRESSES,
+    DEFAULT_GEOCODE_ADDRESSES,
+    DOMAIN,
+)
+from .helpers import (
+    merge_intervention_archive,
+    navigation_uri,
+    normalize_geocoding_query,
+    parse_geocoding_result,
+)
 from .models import OperationsSnapshot
 
 _LOGGER = logging.getLogger(__name__)
 
 _STORAGE_VERSION = 1
 _STORAGE_KEY_PREFIX = f"{DOMAIN}.intervention_history"
+_GEOCODING_URL = "https://data.geopf.fr/geocodage/search"
 
 
 async def async_remove_history_store(
@@ -81,6 +94,7 @@ class ArtemisInterventionHistoryManager:
             f"{_STORAGE_KEY_PREFIX}.{entry.entry_id}",
         )
         self._records: dict[str, dict[str, Any]] = {}
+        self._geocode_cache: dict[str, dict[str, Any]] = {}
         self._entities: dict[str, ArtemisInterventionGeoLocation] = {}
         self._lock = asyncio.Lock()
 
@@ -96,8 +110,17 @@ class ArtemisInterventionHistoryManager:
                 if isinstance(value, dict)
             }
 
+        raw_geocode_cache = stored.get("geocode_cache")
+        if isinstance(raw_geocode_cache, dict):
+            self._geocode_cache = {
+                str(key): value
+                for key, value in raw_geocode_cache.items()
+                if isinstance(value, dict)
+            }
+
         await self._async_ingest_snapshot(self.runtime.operations.data)
         await self._async_repair_recent_missing_coordinates()
+        await self._async_geocode_missing_coordinates()
 
         entities = []
         for key, record in self._records.items():
@@ -166,7 +189,7 @@ class ArtemisInterventionHistoryManager:
             repaired += 1
 
         if repaired:
-            await self._store.async_save({"interventions": self._records})
+            await self._async_save_store()
 
         _LOGGER.debug(
             "ARTEMIS archived GPS recovery candidates=%s repaired=%s "
@@ -174,6 +197,149 @@ class ArtemisInterventionHistoryManager:
             min(len(candidates), 5),
             repaired,
         )
+
+    async def _async_save_store(self) -> None:
+        """Persist intervention history and the local geocoding cache."""
+
+        await self._store.async_save(
+            {
+                "interventions": self._records,
+                "geocode_cache": self._geocode_cache,
+            }
+        )
+
+    @property
+    def _geocoding_enabled(self) -> bool:
+        return bool(
+            self.entry.options.get(
+                CONF_GEOCODE_ADDRESSES,
+                DEFAULT_GEOCODE_ADDRESSES,
+            )
+        )
+
+    async def _async_geocode_missing_coordinates(self) -> None:
+        """Geocode archived address-only interventions when explicitly enabled."""
+
+        if not self._geocoding_enabled:
+            return
+
+        changed, cache_changed = await self._async_geocode_records(
+            tuple(self._records)
+        )
+        if changed or cache_changed:
+            await self._async_save_store()
+
+        _LOGGER.debug(
+            "ARTEMIS address geocoding archive_scan=%s repaired=%s "
+            "cache_entries=%s address_logged=false",
+            len(self._records),
+            len(changed),
+            len(self._geocode_cache),
+        )
+
+    async def _async_geocode_records(
+        self,
+        keys: tuple[str, ...] | set[str],
+    ) -> tuple[set[str], bool]:
+        """Apply cached or live address geocoding to records without GPS."""
+
+        if not self._geocoding_enabled:
+            return set(), False
+
+        changed: set[str] = set()
+        cache_changed = False
+        for key in keys:
+            record = self._records.get(key)
+            if record is None:
+                continue
+            if (
+                record.get("latitude") is not None
+                and record.get("longitude") is not None
+            ):
+                continue
+
+            address = str(record.get("address") or "").strip()
+            if not address or address == "Adresse non communiquee":
+                continue
+
+            result, new_cache_value = await self._async_geocode_address(address)
+            cache_changed = cache_changed or new_cache_value
+            if result is None:
+                continue
+
+            record["latitude"] = result["latitude"]
+            record["longitude"] = result["longitude"]
+            record["navigation_uri"] = navigation_uri(
+                result["latitude"],
+                result["longitude"],
+                address,
+            )
+            record["geolocation_source"] = "geocoded_address"
+            record["geocode_score"] = result["score"]
+            record["geocode_label"] = result["label"]
+            self._records[key] = record
+            changed.add(key)
+
+        return changed, cache_changed
+
+    async def _async_geocode_address(
+        self,
+        address: str,
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Resolve one French address through the official Geoplateforme API."""
+
+        query = normalize_geocoding_query(address)
+        if not query:
+            return None, False
+
+        cached = self._geocode_cache.get(query)
+        if cached is not None:
+            if not cached.get("found"):
+                return None, False
+            return cached, False
+
+        session = async_get_clientsession(self.hass)
+        try:
+            async with session.get(
+                _GEOCODING_URL,
+                params={
+                    "q": query,
+                    "index": "address",
+                    "limit": "1",
+                    "autocomplete": "0",
+                },
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status != 200:
+                    _LOGGER.debug(
+                        "ARTEMIS address geocoding HTTP status=%s "
+                        "address_logged=false",
+                        response.status,
+                    )
+                    return None, False
+                payload = await response.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+            _LOGGER.debug(
+                "ARTEMIS address geocoding unavailable error_type=%s "
+                "address_logged=false",
+                type(err).__name__,
+            )
+            return None, False
+
+        latitude, longitude, score, label = parse_geocoding_result(payload)
+        if latitude is None or longitude is None or score is None:
+            self._geocode_cache[query] = {"found": False}
+            return None, True
+
+        result = {
+            "found": True,
+            "latitude": latitude,
+            "longitude": longitude,
+            "score": round(score, 3),
+            "label": label,
+        }
+        self._geocode_cache[query] = result
+        return result, True
 
     @callback
     def handle_coordinator_update(self) -> None:
@@ -197,10 +363,12 @@ class ArtemisInterventionHistoryManager:
                 operations,
                 observed_at,
             )
-            if not changed:
+            geocoded, cache_changed = await self._async_geocode_records(changed)
+            changed.update(geocoded)
+            if not changed and not cache_changed:
                 return
 
-            await self._store.async_save({"interventions": self._records})
+            await self._async_save_store()
 
             new_entities: list[ArtemisInterventionGeoLocation] = []
             for key in changed:
