@@ -380,6 +380,25 @@ class OperationTests(unittest.TestCase):
         self.assertEqual(latitude, 46.43625)
         self.assertEqual(longitude, 5.34492)
 
+    def test_operation_coordinates_from_navigation_url(self) -> None:
+        latitude, longitude = helpers.operation_coordinates(
+            {
+                "url": (
+                    "https://maps.example.invalid/?destination="
+                    "46.43625%2C5.34492"
+                )
+            }
+        )
+        self.assertEqual(latitude, 46.43625)
+        self.assertEqual(longitude, 5.34492)
+
+    def test_navigation_url_coordinates_ignore_geo_zero_zero(self) -> None:
+        latitude, longitude = helpers.navigation_url_coordinates(
+            "geo:0,0?q=SAINT-AMOUR+-+22+RUE+DE+BRESSE"
+        )
+        self.assertIsNone(latitude)
+        self.assertIsNone(longitude)
+
     def test_intervention_archive_tracks_new_update_and_end(self) -> None:
         records = {}
         operation = {
