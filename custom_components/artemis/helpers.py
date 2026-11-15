@@ -530,6 +530,70 @@ def navigation_url_coordinates(value: Any) -> tuple[float | None, float | None]:
     return None, None
 
 
+def normalize_geocoding_query(address: Any) -> str:
+    """Normalize ARTEMIS display addresses for the French address geocoder."""
+
+    value = " ".join(str(address or "").split()).strip(" -")
+    if not value:
+        return ""
+
+    if " - " in value:
+        city, street = (part.strip() for part in value.split(" - ", 1))
+        if city and street and any(char.isdigit() for char in street):
+            return f"{street} {city}"
+
+    return value
+
+
+def parse_geocoding_result(
+    payload: Any,
+    *,
+    minimum_score: float = 0.6,
+) -> tuple[float | None, float | None, float | None, str]:
+    """Return the first sufficiently confident GeoJSON address result."""
+
+    if not isinstance(payload, dict):
+        return None, None, None, ""
+
+    features = payload.get("features")
+    if not isinstance(features, list):
+        return None, None, None, ""
+
+    for feature in features:
+        if not isinstance(feature, dict):
+            continue
+
+        properties = feature.get("properties")
+        geometry = feature.get("geometry")
+        if not isinstance(properties, dict) or not isinstance(geometry, dict):
+            continue
+
+        try:
+            score = float(properties.get("score"))
+        except (TypeError, ValueError):
+            continue
+        if score < minimum_score:
+            continue
+
+        coordinates = geometry.get("coordinates")
+        if not isinstance(coordinates, (list, tuple)) or len(coordinates) < 2:
+            continue
+
+        longitude = coerce_coordinate(coordinates[0], latitude=False)
+        latitude = coerce_coordinate(coordinates[1], latitude=True)
+        if latitude is None or longitude is None:
+            continue
+
+        return (
+            latitude,
+            longitude,
+            score,
+            str(properties.get("label") or "").strip(),
+        )
+
+    return None, None, None, ""
+
+
 def operation_coordinates(
     operation: dict[str, Any],
 ) -> tuple[float | None, float | None]:
