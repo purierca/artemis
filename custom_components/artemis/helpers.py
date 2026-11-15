@@ -549,7 +549,7 @@ def operation_coordinates(
         candidates.append(address)
 
     raw_addresses = operation.get("addresses") or []
-    if isinstance(raw_addresses, list):
+    if isinstance(raw_addresses, (list, tuple)):
         candidates.extend(item for item in raw_addresses if isinstance(item, dict))
 
     for container_name in ("location", "position", "gps", "geometry", "coordinate"):
