@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented here.
 
+## 0.8.0
+
+### Intervention data
+
+- Enrich `sensor.interventions_artemis` without changing its entity id or active-snapshot role.
+- Add per-intervention `type_code`, `resource_count`, `person_count`, `communication_group`, `centers[]`, `external_services[]` and `history[]`.
+- Decode Smartemis `grpRadio`, engaged centres, external services and the `getHistItv` chronology when the subscriber has the corresponding right.
+- Throttle Smartemis chronology reads to five minutes per active intervention to avoid unnecessary API load.
+- Keep WebEvo and Smartemis normalized under the same intervention structure; unsupported fields remain empty/null rather than being guessed.
+
+### Historical intervention map
+
+- Add a `geo_location` platform with source `artemis`.
+- Persist every intervention observed by this Home Assistant instance in local `.storage`, including active/ended lifecycle timestamps and the last normalized metadata.
+- Keep archived interventions available after they disappear from the live synoptic and across Home Assistant restarts.
+- Create one stable geolocation entity per observed intervention so archived interventions with GPS can be displayed together on the native Home Assistant map.
+- Keep non-geolocated interventions in the local archive as well; they simply do not render as map markers.
+- Do not create additional history sensors; the existing two sensors and status button remain unchanged.
+- Remove the local intervention archive automatically when the ARTEMIS / Smartemis config entry is deleted.
+- No archived intervention data is sent anywhere by the integration.
+
 ## 0.7.3
 
 ### Privacy / documentation
