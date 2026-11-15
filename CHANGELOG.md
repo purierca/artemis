@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented here.
 
+## 0.8.1
+
+### Hotfix
+
+- Fix Smartemis intervention geolocation when the first address record has no GPS coordinates.
+- Scan all Smartemis address records and use the first valid WGS84 latitude/longitude pair.
+- Restore native Home Assistant map markers for intervention history when Smartemis provides GPS on a secondary address record.
+
 ## 0.8.0
 
 ### Intervention data
