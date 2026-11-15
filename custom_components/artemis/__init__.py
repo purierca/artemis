@@ -40,7 +40,7 @@ from .smartemis_coordinator import (
     SmartemisPlanningCoordinator,
 )
 
-PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
+PLATFORMS = [Platform.SENSOR, Platform.BUTTON, Platform.GEO_LOCATION]
 
 
 def _remove_legacy_entities(hass: HomeAssistant, staff_id: str) -> None:
