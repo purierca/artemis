@@ -75,6 +75,15 @@ class SmartemisProtocolTests(unittest.TestCase):
                 },
                 '[1,"getItv",1,0,{"1":{"rec":{"1":{"str":"phone"},"2":{"str":"05"},"3":{"str":"MAT"},"4":{"i32":42}}}}]',
             ),
+            "getHistItv": (
+                {
+                    1: smartemis._scalar("str", "phone"),
+                    2: smartemis._scalar("str", "05"),
+                    3: smartemis._scalar("str", "MAT"),
+                    4: smartemis._scalar("i32", 42),
+                },
+                '[1,"getHistItv",1,0,{"1":{"rec":{"1":{"str":"phone"},"2":{"str":"05"},"3":{"str":"MAT"},"4":{"i32":42}}}}]',
+            ),
         }
         for method, (fields, expected) in cases.items():
             with self.subTest(method=method):
@@ -245,6 +254,20 @@ class SmartemisProtocolTests(unittest.TestCase):
         self.assertEqual(result["resource_count"], 2)
         self.assertEqual(result["address_count"], 1)
         self.assertEqual(result["person_count"], 5)
+
+    def test_intervention_history_normalization(self):
+        result = smartemis._normalize_intervention_history(
+            {
+                2: [
+                    {
+                        1: {1: "2026-11-15T12:00:00.0+0100"},
+                        2: "ENGIN ENGAGE",
+                    }
+                ]
+            }
+        )
+        self.assertEqual(result[0]["date"], "2026-11-15T12:00:00.0+0100")
+        self.assertEqual(result[0]["text"], "ENGIN ENGAGE")
 
     def test_intervention_detail_normalization(self):
         result = smartemis._normalize_intervention_detail(
