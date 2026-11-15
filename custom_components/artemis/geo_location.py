@@ -6,9 +6,9 @@ import asyncio
 import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import aiohttp
-from typing import Any
 
 from homeassistant.components.geo_location import GeolocationEvent
 from homeassistant.config_entries import ConfigEntry
@@ -318,7 +318,7 @@ class ArtemisInterventionHistoryManager:
                     )
                     return None, False
                 payload = await response.json(content_type=None)
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+        except (TimeoutError, aiohttp.ClientError, ValueError) as err:
             _LOGGER.debug(
                 "ARTEMIS address geocoding unavailable error_type=%s "
                 "address_logged=false",
