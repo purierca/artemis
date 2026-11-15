@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented here.
 
+## 0.8.3
+
+### Address geocoding fallback
+
+- Add an explicit **Geocode addresses without GPS** integration option, disabled by default.
+- When enabled, keep ARTEMIS/Smartemis GPS as the first choice and send only address-only interventions to the official French Geoplateforme geocoding service at `data.geopf.fr`.
+- Convert confident French address matches into latitude/longitude so current and archived `geo_location.artemis_*` entities can render on the native Home Assistant map.
+- Normalize ARTEMIS display addresses such as `SAINT-AMOUR - 22 RUE DE BRESSE` before geocoding.
+- Cache successful and not-found geocoding results in the integration's local Home Assistant storage so the same address is not repeatedly queried.
+- Mark fallback coordinates with `geolocation_source: geocoded_address`, plus the returned label and confidence score.
+- Reload the integration when the option changes, so enabling the fallback immediately attempts to repair existing archived address-only interventions.
+- No address is sent to the external geocoder unless the user explicitly enables this option.
+
 ## 0.8.2
 
 ### Geolocation hotfix
