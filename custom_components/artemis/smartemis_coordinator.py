@@ -306,6 +306,30 @@ class SmartemisOperationsCoordinator(DataUpdateCoordinator[OperationsSnapshot]):
             int, tuple[float, tuple[dict[str, Any], ...]]
         ] = {}
 
+    async def async_recover_coordinates(
+        self,
+        intervention_id: int,
+    ) -> tuple[float | None, float | None]:
+        """Best-effort GPS recovery for a recently archived intervention."""
+
+        try:
+            detail = await self.api.async_get_intervention_detail(
+                self.server,
+                phone_id=self.phone_id,
+                center_id=self.center.id,
+                matricule=self.center.matricule,
+                intervention_id=intervention_id,
+            )
+        except (SmartemisConnectionError, SmartemisServiceError) as err:
+            _LOGGER.debug(
+                "Smartemis archived intervention GPS recovery unavailable "
+                "error_type=%s",
+                type(err).__name__,
+            )
+            return None, None
+
+        return operation_coordinates({"addresses": detail.get("addresses") or ()})
+
     async def _async_update_data(self) -> OperationsSnapshot:
         global_view = (
             RIGHT_PARAMETERS in self.center.rights
@@ -421,7 +445,9 @@ def _operation_snapshot(
         or summary.get("address")
         or "Adresse non communiquee"
     ).strip()
-    latitude, longitude = operation_coordinates({"addresses": addresses})
+    latitude, longitude = operation_coordinates(
+        {"addresses": addresses, "url": summary.get("url")}
+    )
 
     vehicles = [
         {
