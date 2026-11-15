@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented here.
 
+## 0.8.2
+
+### Geolocation hotfix
+
+- Extract Smartemis GPS coordinates from embedded navigation URLs when address records do not contain latitude/longitude.
+- On startup, best-effort re-query up to five Smartemis interventions ended within the last 24 hours when their local archive entry has no GPS, allowing recent archived markers to repair themselves when the server still exposes the intervention detail.
+- Keep geolocation recovery local to the Smartemis server: no external geocoding service is used and intervention addresses are not sent to third parties.
+
 ## 0.8.1
 
 ### Hotfix
