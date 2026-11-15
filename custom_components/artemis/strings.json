@@ -78,5 +78,19 @@
       "reauth_successful": "ARTEMIS has been reconnected.",
       "unknown": "Unable to continue the configuration flow."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ARTEMIS options",
+        "description": "Address geocoding is disabled by default. When enabled, ARTEMIS sends only intervention addresses that lack GPS coordinates to the official French Geoplateforme geocoding service to obtain latitude/longitude for the Home Assistant map. Results are cached locally.",
+        "data": {
+          "geocode_addresses": "Geocode addresses without GPS"
+        },
+        "data_description": {
+          "geocode_addresses": "Uses the official French Geoplateforme/BAN service only when ARTEMIS or Smartemis does not provide GPS coordinates."
+        }
+      }
+    }
   }
 }
