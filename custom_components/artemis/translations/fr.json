@@ -78,5 +78,19 @@
       "reauth_successful": "ARTEMIS est reconnecté.",
       "unknown": "Impossible de poursuivre la configuration."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options ARTEMIS",
+        "description": "Le géocodage d’adresse est désactivé par défaut. S’il est activé, ARTEMIS envoie uniquement les adresses d’intervention sans coordonnées GPS au service officiel de géocodage Géoplateforme afin d’obtenir latitude/longitude pour la carte Home Assistant. Les résultats sont mis en cache localement.",
+        "data": {
+          "geocode_addresses": "Géocoder les adresses sans GPS"
+        },
+        "data_description": {
+          "geocode_addresses": "Utilise le service public français Géoplateforme/BAN uniquement lorsqu’ARTEMIS ou Smartemis ne fournit pas de coordonnées GPS."
+        }
+      }
+    }
   }
 }
