@@ -15,7 +15,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import SMARTEMIS_UPDATE_INTERVAL
-from .helpers import coerce_coordinate, cycle_status_code, navigation_uri
+from .helpers import cycle_status_code, navigation_uri, operation_coordinates
 from .models import OperationsSnapshot, PlanningSnapshot, StatusValue
 from .smartemis import (
     RIGHT_INTERVENTION_HISTORY,
@@ -421,8 +421,7 @@ def _operation_snapshot(
         or summary.get("address")
         or "Adresse non communiquee"
     ).strip()
-    latitude = coerce_coordinate(first_address.get("latitude"), latitude=True)
-    longitude = coerce_coordinate(first_address.get("longitude"), latitude=False)
+    latitude, longitude = operation_coordinates({"addresses": addresses})
 
     vehicles = [
         {
