@@ -27,6 +27,20 @@ _STORAGE_VERSION = 1
 _STORAGE_KEY_PREFIX = f"{DOMAIN}.intervention_history"
 
 
+async def async_remove_history_store(
+    hass: HomeAssistant,
+    entry_id: str,
+) -> None:
+    """Delete the locally persisted intervention archive for a removed entry."""
+
+    store: Store[dict[str, Any]] = Store(
+        hass,
+        _STORAGE_VERSION,
+        f"{_STORAGE_KEY_PREFIX}.{entry_id}",
+    )
+    await store.async_remove()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
