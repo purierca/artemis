@@ -399,6 +399,58 @@ class OperationTests(unittest.TestCase):
         self.assertIsNone(latitude)
         self.assertIsNone(longitude)
 
+    def test_normalize_geocoding_query_reorders_artemis_address(self) -> None:
+        self.assertEqual(
+            helpers.normalize_geocoding_query(
+                "SAINT-AMOUR - 22 RUE DE BRESSE"
+            ),
+            "22 RUE DE BRESSE SAINT-AMOUR",
+        )
+
+    def test_parse_geocoding_result_uses_geojson_coordinates(self) -> None:
+        latitude, longitude, score, label = helpers.parse_geocoding_result(
+            {
+                "features": [
+                    {
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [5.34321, 46.43654],
+                        },
+                        "properties": {
+                            "score": 0.94,
+                            "label": "22 Rue de Bresse 39160 Saint-Amour",
+                        },
+                    }
+                ]
+            }
+        )
+        self.assertEqual(latitude, 46.43654)
+        self.assertEqual(longitude, 5.34321)
+        self.assertEqual(score, 0.94)
+        self.assertEqual(label, "22 Rue de Bresse 39160 Saint-Amour")
+
+    def test_parse_geocoding_result_rejects_low_confidence(self) -> None:
+        latitude, longitude, score, label = helpers.parse_geocoding_result(
+            {
+                "features": [
+                    {
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [5.0, 46.0],
+                        },
+                        "properties": {
+                            "score": 0.2,
+                            "label": "Weak match",
+                        },
+                    }
+                ]
+            }
+        )
+        self.assertIsNone(latitude)
+        self.assertIsNone(longitude)
+        self.assertIsNone(score)
+        self.assertEqual(label, "")
+
     def test_intervention_archive_tracks_new_update_and_end(self) -> None:
         records = {}
         operation = {
