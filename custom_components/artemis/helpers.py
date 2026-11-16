@@ -856,8 +856,10 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
 
 _ARCHIVE_META_KEYS = {"active", "first_seen", "last_seen", "ended"}
 
-_INTERVENTION_ICON_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("FEU", "INCENDIE", "FUMEE", "BRULE", "EXPLOSION"), "mdi:fire"),
+_INTERVENTION_VISUAL_RULES: tuple[
+    tuple[tuple[str, ...], str, str], ...
+] = (
+    (("FEU", "INCENDIE", "FUMEE", "BRULE", "EXPLOSION"), "fire", "mdi:fire"),
     (
         (
             "ACCIDENT",
@@ -867,10 +869,15 @@ _INTERVENTION_ICON_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
             "DESINCARCERATION",
             "VEHICULE",
         ),
+        "traffic",
         "mdi:car-emergency",
     ),
-    (("ASCENSEUR",), "mdi:elevator-passenger"),
-    (("CHUTE", "PERSONNE COINCEE", "PERSONNE CAPTIVE"), "mdi:account-alert"),
+    (("ASCENSEUR",), "elevator", "mdi:elevator-passenger"),
+    (
+        ("CHUTE", "PERSONNE COINCEE", "PERSONNE CAPTIVE"),
+        "fall",
+        "mdi:account-alert",
+    ),
     (
         (
             "SECOURS A PERSONNE",
@@ -879,13 +886,22 @@ _INTERVENTION_ICON_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
             "ARRET CARDIAQUE",
             "INCONSCIENT",
         ),
+        "medical",
         "mdi:ambulance",
     ),
-    (("NOYADE", "AQUATIQUE", "NAUTIQUE", "INONDATION"), "mdi:waves"),
-    (("GAZ", "MONOXYDE"), "mdi:gas-cylinder"),
-    (("ANIMAL", "CHIEN", "CHAT"), "mdi:paw"),
-    (("EFFONDREMENT", "OUVERTURE DE PORTE"), "mdi:home-alert"),
-    (("ARBRE", "TEMPETE"), "mdi:tree"),
+    (
+        ("NOYADE", "AQUATIQUE", "NAUTIQUE", "INONDATION"),
+        "water",
+        "mdi:waves",
+    ),
+    (("GAZ", "MONOXYDE"), "gas", "mdi:gas-cylinder"),
+    (("ANIMAL", "CHIEN", "CHAT"), "animal", "mdi:paw"),
+    (
+        ("EFFONDREMENT", "OUVERTURE DE PORTE"),
+        "building",
+        "mdi:home-alert",
+    ),
+    (("ARBRE", "TEMPETE"), "storm", "mdi:tree"),
 )
 
 
@@ -900,14 +916,26 @@ def _normalized_intervention_label(value: Any) -> str:
     )
 
 
-def intervention_icon(title: Any, type_code: Any = "") -> str:
-    """Return a visual MDI icon for an intervention title/type."""
+def _intervention_visual(title: Any, type_code: Any = "") -> tuple[str, str]:
+    """Return marker kind and MDI fallback icon for an intervention."""
 
     label = _normalized_intervention_label(f"{title or ''} {type_code or ''}")
-    for keywords, icon in _INTERVENTION_ICON_RULES:
+    for keywords, kind, icon in _INTERVENTION_VISUAL_RULES:
         if any(keyword in label for keyword in keywords):
-            return icon
-    return "mdi:alert"
+            return kind, icon
+    return "generic", "mdi:alert"
+
+
+def intervention_marker_kind(title: Any, type_code: Any = "") -> str:
+    """Return the coloured marker category for an intervention."""
+
+    return _intervention_visual(title, type_code)[0]
+
+
+def intervention_icon(title: Any, type_code: Any = "") -> str:
+    """Return the MDI fallback icon for an intervention."""
+
+    return _intervention_visual(title, type_code)[1]
 
 
 def intervention_reference_time(
