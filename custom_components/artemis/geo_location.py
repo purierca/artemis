@@ -32,11 +32,13 @@ from .const import (
 from .helpers import (
     intervention_icon,
     intervention_is_recent,
+    intervention_marker_kind,
     merge_intervention_archive,
     navigation_uri,
     normalize_geocoding_query,
     parse_geocoding_result,
 )
+from .marker import marker_picture_url
 from .models import OperationsSnapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -498,7 +500,12 @@ class ArtemisInterventionGeoLocation(GeolocationEvent):
         self._record = dict(record)
         number = str(record.get("number") or record.get("id") or "").strip()
         title = str(record.get("title") or "Intervention").strip()
+        marker_kind = intervention_marker_kind(title, record.get("type_code"))
         self._attr_icon = intervention_icon(title, record.get("type_code"))
+        self._attr_entity_picture = marker_picture_url(
+            marker_kind,
+            bool(record.get("active")),
+        )
         self._attr_name = (
             f"ARTEMIS {number} — {title}" if number else f"ARTEMIS — {title}"
         )
