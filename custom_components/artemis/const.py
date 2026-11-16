@@ -19,6 +19,11 @@ CONF_SMARTEMIS_PHONE_ID = "smartemis_phone_id"
 CONF_GEOCODE_ADDRESSES = "geocode_addresses"
 DEFAULT_GEOCODE_ADDRESSES = False
 
+CONF_MAP_HISTORY_DAYS = "map_history_days"
+DEFAULT_MAP_HISTORY_DAYS = 7
+MIN_MAP_HISTORY_DAYS = 1
+MAX_MAP_HISTORY_DAYS = 3650
+
 
 DEFAULT_HOST = "https://artemisweb.sdis39.fr"
 DEFAULT_CAS_SERVICE = "https://artemis/artemis-web"
@@ -26,7 +31,6 @@ DEFAULT_CAS_SERVICE = "https://artemis/artemis-web"
 PLANNING_UPDATE_INTERVAL = timedelta(minutes=5)
 CENTER_COUNTER_UPDATE_INTERVAL = timedelta(seconds=30)
 SMARTEMIS_UPDATE_INTERVAL = timedelta(seconds=30)
-GEO_LOCATION_HISTORY_WINDOW = timedelta(days=7)
 MAX_LOOKAHEAD_WEEKS = 8
 
 # Public WebEvo write cycle. Smartemis writes remain internal until live validation.
