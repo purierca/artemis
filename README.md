@@ -44,6 +44,14 @@ The recommended setup is entirely driven from the Home Assistant config flow:
 6. Home Assistant captures the existing `phoneId` from the first recognised Smartemis Thrift request, forwards that request to its original official Smartemis server, and validates the identity;
 7. return to Home Assistant, continue setup, then remove the temporary Wi-Fi proxy.
 
+<!-- smartemis-ios-proxy-screenshots -->
+On **iOS/iPadOS**, open the active Wi-Fi network, choose **Configure Proxy / Configurer le serveur mandataire -> Automatic / Automatique**, then paste the PAC URL shown by Home Assistant.
+
+<p align="center">
+  <img src="docs/images/ios-smartemis-proxy-settings.webp" alt="iOS Wi-Fi proxy settings for Smartemis automatic detection" width="360">
+  <img src="docs/images/ios-smartemis-proxy-pac.webp" alt="iOS automatic proxy PAC URL for Smartemis detection" width="360">
+</p>
+
 The capture proxy is deliberately narrow:
 
 - only hosts returned by the official Smartemis directory are proxied;
@@ -86,6 +94,15 @@ If a Smartemis deployment does not expose one of those status codes or does not 
 
 
 ## Intervention data and local history
+
+<!-- smartemis-intervention-screenshot -->
+### Smartemis intervention example
+
+The official Smartemis app exposes the intervention context that the integration normalizes for Home Assistant:
+
+<p align="center">
+  <img src="docs/images/smartemis-intervention-example.webp" alt="Smartemis intervention example" width="800">
+</p>
 
 `sensor.interventions_artemis` remains the live active-intervention snapshot. Each normalized intervention can now include:
 

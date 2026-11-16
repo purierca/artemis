@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented here.
 
+## 0.8.4
+
+### README / setup guide
+
+- Added a real Smartemis intervention screenshot.
+- Added iOS Wi-Fi proxy and automatic PAC setup screenshots.
+- Clarified the iOS **Configure Proxy -> Automatic** step.
+
+No integration behavior changed in this release.
+
 ## 0.8.3
 
 ### What changes
