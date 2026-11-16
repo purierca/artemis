@@ -83,12 +83,14 @@
     "step": {
       "init": {
         "title": "ARTEMIS options",
-        "description": "Address geocoding is disabled by default. When enabled, ARTEMIS sends only intervention addresses that lack GPS coordinates to the official French Geoplateforme geocoding service to obtain latitude/longitude for the Home Assistant map. Results are cached locally.",
+        "description": "The complete intervention history remains stored locally in Home Assistant. “Map history (days)” controls only how many days are exposed as geo_location entities for maps. The default is 7 days. Changing an option automatically reloads the integration. Address geocoding remains disabled by default.",
         "data": {
-          "geocode_addresses": "Geocode addresses without GPS"
+          "geocode_addresses": "Geocode addresses without GPS",
+          "map_history_days": "Map history (days)"
         },
         "data_description": {
-          "geocode_addresses": "Uses the official French Geoplateforme/BAN service only when ARTEMIS or Smartemis does not provide GPS coordinates."
+          "geocode_addresses": "Uses the official French Geoplateforme/BAN service only when ARTEMIS or Smartemis does not provide GPS coordinates.",
+          "map_history_days": "Number of intervention days exposed as geo_location entities. Reducing this value never deletes interventions from the permanent local archive."
         }
       }
     }
