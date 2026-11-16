@@ -165,7 +165,26 @@ Each recent geolocation entity exposes attributes such as:
 
 Interventions with coordinates appear directly on a Home Assistant Map card. Interventions without coordinates remain in the permanent archive but cannot be drawn on a map.
 
-Map icons are selected automatically from the intervention title: fire, road accident, fall/person rescue, medical assistance, water rescue, gas, animal rescue, building incident, storm/tree, or a generic alert fallback. Home Assistant's native Map card currently has no `color` option for an entire dynamic geolocation source, so ARTEMIS can supply the contextual icon but cannot force every source marker to red.
+ARTEMIS also supplies a native `entity_picture` for every recent intervention so the standard Home Assistant Map card can show a **coloured intervention marker without card-mod/UIX/custom CSS**.
+
+Active interventions use a colour by category:
+
+| Intervention category | Marker colour | MDI fallback |
+| --- | --- | --- |
+| Fire / smoke / explosion | Red | `mdi:fire` |
+| Road accident / vehicle | Orange | `mdi:car-emergency` |
+| Medical assistance | Blue | `mdi:ambulance` |
+| Fall / trapped person | Purple | `mdi:account-alert` |
+| Water rescue / flooding | Cyan | `mdi:waves` |
+| Gas / carbon monoxide | Amber | `mdi:gas-cylinder` |
+| Animal rescue | Brown | `mdi:paw` |
+| Building incident | Violet | `mdi:home-alert` |
+| Storm / tree | Green | `mdi:tree` |
+| Other | Slate | `mdi:alert` |
+
+When an intervention ends, its marker automatically becomes **grey** while keeping its category symbol. The existing MDI `icon` attribute remains available as a fallback.
+
+> **Important:** do not set `label_mode` on the ARTEMIS geolocation source if you want the coloured marker. Home Assistant intentionally suppresses `entity_picture` when a map entity/source has an explicit label mode such as `icon`.
 
 Example:
 
@@ -174,10 +193,11 @@ type: map
 title: ARTEMIS intervention history
 geo_location_sources:
   - source: artemis
-    label_mode: icon
 auto_fit: true
 cluster: true
 ```
+
+If you explicitly prefer the plain Home Assistant MDI marker instead of the coloured ARTEMIS marker, set `label_mode: icon`.
 
 The archive starts when this feature is installed; it cannot reconstruct interventions that Home Assistant never observed.
 
