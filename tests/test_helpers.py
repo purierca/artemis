@@ -473,6 +473,23 @@ class OperationTests(unittest.TestCase):
             "mdi:alert",
         )
 
+        self.assertEqual(
+            helpers.intervention_marker_kind("FEU HABITATION", "ST"),
+            "fire",
+        )
+        self.assertEqual(
+            helpers.intervention_marker_kind("ACCIDENT VL CONTRE MOTO", "ST"),
+            "traffic",
+        )
+        self.assertEqual(
+            helpers.intervention_marker_kind("SECOURS A PERSONNE", "ST"),
+            "medical",
+        )
+        self.assertEqual(
+            helpers.intervention_marker_kind("INTERVENTION DIVERSE", "ST"),
+            "generic",
+        )
+
     def test_intervention_recent_window_uses_created_then_first_seen(self) -> None:
         now = datetime.fromisoformat("2026-11-16T12:00:00+00:00")
         seven_days = timedelta(days=7)
