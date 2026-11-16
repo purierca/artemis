@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented here.
 
+## 0.8.7
+
+### Native coloured map markers
+
+- Add native coloured intervention markers through `entity_picture`: fire red, traffic orange, medical blue, other categories distinct, and ended interventions grey.
+- Keep the contextual MDI `icon` as a fallback.
+- Use the standard Home Assistant Map card with no explicit `label_mode` for ARTEMIS; `label_mode: icon` intentionally switches back to the plain MDI marker.
+
 ## 0.8.6
 
 ### Configurable map history
