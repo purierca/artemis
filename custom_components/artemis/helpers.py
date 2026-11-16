@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any
 from urllib.parse import quote_plus, unquote_plus
 from zoneinfo import ZoneInfo
@@ -854,6 +855,97 @@ def operation_snapshot_data(operation: dict[str, Any]) -> dict[str, Any]:
 
 
 _ARCHIVE_META_KEYS = {"active", "first_seen", "last_seen", "ended"}
+
+_INTERVENTION_ICON_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("FEU", "INCENDIE", "FUMEE", "BRULE", "EXPLOSION"), "mdi:fire"),
+    (
+        (
+            "ACCIDENT",
+            "AVP",
+            "COLLISION",
+            "SORTIE DE ROUTE",
+            "DESINCARCERATION",
+            "VEHICULE",
+        ),
+        "mdi:car-emergency",
+    ),
+    (("ASCENSEUR",), "mdi:elevator-passenger"),
+    (("CHUTE", "PERSONNE COINCEE", "PERSONNE CAPTIVE"), "mdi:account-alert"),
+    (
+        (
+            "SECOURS A PERSONNE",
+            "MALAISE",
+            "DETRESSE",
+            "ARRET CARDIAQUE",
+            "INCONSCIENT",
+        ),
+        "mdi:ambulance",
+    ),
+    (("NOYADE", "AQUATIQUE", "NAUTIQUE", "INONDATION"), "mdi:waves"),
+    (("GAZ", "MONOXYDE"), "mdi:gas-cylinder"),
+    (("ANIMAL", "CHIEN", "CHAT"), "mdi:paw"),
+    (("EFFONDREMENT", "OUVERTURE DE PORTE"), "mdi:home-alert"),
+    (("ARBRE", "TEMPETE"), "mdi:tree"),
+)
+
+
+def _normalized_intervention_label(value: Any) -> str:
+    """Return an uppercase accent-insensitive label for icon matching."""
+
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    return " ".join(
+        "".join(char for char in normalized if not unicodedata.combining(char))
+        .upper()
+        .split()
+    )
+
+
+def intervention_icon(title: Any, type_code: Any = "") -> str:
+    """Return a visual MDI icon for an intervention title/type."""
+
+    label = _normalized_intervention_label(f"{title or ''} {type_code or ''}")
+    for keywords, icon in _INTERVENTION_ICON_RULES:
+        if any(keyword in label for keyword in keywords):
+            return icon
+    return "mdi:alert"
+
+
+def intervention_reference_time(
+    record: dict[str, Any],
+    *,
+    default_tz: tzinfo = UTC,
+) -> datetime | None:
+    """Return the intervention creation time, falling back to first observation."""
+
+    for key in ("created", "first_seen"):
+        raw = record.get(key)
+        if raw in (None, ""):
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=default_tz)
+        return parsed.astimezone(UTC)
+    return None
+
+
+def intervention_is_recent(
+    record: dict[str, Any],
+    now: datetime,
+    max_age: timedelta,
+    *,
+    default_tz: tzinfo = UTC,
+) -> bool:
+    """Return whether an archived intervention belongs in the recent map feed."""
+
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    reference = intervention_reference_time(record, default_tz=default_tz)
+    if reference is None:
+        return True
+    return reference >= now.astimezone(UTC) - max_age
 
 
 def intervention_archive_key(operation: dict[str, Any]) -> str:

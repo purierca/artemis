@@ -4,7 +4,7 @@ import importlib
 import sys
 import types
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -450,6 +450,60 @@ class OperationTests(unittest.TestCase):
         self.assertIsNone(longitude)
         self.assertIsNone(score)
         self.assertEqual(label, "")
+
+    def test_intervention_icon_mapping(self) -> None:
+        self.assertEqual(
+            helpers.intervention_icon("FEU HABITATION", "ST"),
+            "mdi:fire",
+        )
+        self.assertEqual(
+            helpers.intervention_icon("ACCIDENT VL CONTRE MOTO", "ST"),
+            "mdi:car-emergency",
+        )
+        self.assertEqual(
+            helpers.intervention_icon("CHUTE DE PERSONNE", "ST"),
+            "mdi:account-alert",
+        )
+        self.assertEqual(
+            helpers.intervention_icon("SECOURS A PERSONNE", "ST"),
+            "mdi:ambulance",
+        )
+        self.assertEqual(
+            helpers.intervention_icon("INTERVENTION DIVERSE", "ST"),
+            "mdi:alert",
+        )
+
+    def test_intervention_recent_window_uses_created_then_first_seen(self) -> None:
+        now = datetime.fromisoformat("2026-11-16T12:00:00+00:00")
+        seven_days = timedelta(days=7)
+
+        self.assertTrue(
+            helpers.intervention_is_recent(
+                {
+                    "created": "2026-11-10T13:00:00+00:00",
+                    "first_seen": "2026-11-16T10:00:00+00:00",
+                },
+                now,
+                seven_days,
+            )
+        )
+        self.assertFalse(
+            helpers.intervention_is_recent(
+                {
+                    "created": "2026-11-09T11:59:59+00:00",
+                    "first_seen": "2026-11-16T10:00:00+00:00",
+                },
+                now,
+                seven_days,
+            )
+        )
+        self.assertTrue(
+            helpers.intervention_is_recent(
+                {"first_seen": "2026-11-15T10:00:00+00:00"},
+                now,
+                seven_days,
+            )
+        )
 
     def test_intervention_archive_tracks_new_update_and_end(self) -> None:
         records = {}

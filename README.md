@@ -121,7 +121,9 @@ Version 0.8.0 adds a separate Home Assistant **geolocation source** named `artem
 
 Every intervention first observed by Home Assistant is copied into a local archive and retained after it disappears from the live synoptic. The archive stores only normalized intervention data in Home Assistant's local `.storage`; the integration does not upload or synchronize this archive anywhere.
 
-Each archived intervention is exposed as `geo_location.artemis_*` with attributes such as:
+The archive itself is permanent for the lifetime of the integration entry. The native Home Assistant geolocation feed is deliberately only a **recent view** of that archive: interventions created during the **last 7 days** are exposed as `geo_location.artemis_*`. When an intervention becomes older than 7 days, its geolocation entity disappears from Home Assistant, but its archived record is **not deleted**.
+
+Each recent geolocation event exposes attributes such as:
 
 - `active`, `first_seen`, `last_seen`, `ended`;
 - `type_code`, `resource_count`, `person_count`;
@@ -131,6 +133,8 @@ Each archived intervention is exposed as `geo_location.artemis_*` with attribute
 
 Interventions with coordinates appear directly on a Home Assistant Map card. Interventions without coordinates are still retained locally but cannot be drawn on a map.
 
+Map icons are selected automatically from the intervention title: fire, road accident, fall/person rescue, medical assistance, water rescue, gas, animal rescue, building incident, storm/tree, or a generic alert fallback. Home Assistant's native Map card currently has no `color` option for an entire dynamic geolocation source, so ARTEMIS can supply the contextual icon but cannot force every source marker to red.
+
 Example:
 
 ```yaml
@@ -138,8 +142,7 @@ type: map
 title: ARTEMIS intervention history
 geo_location_sources:
   - source: artemis
-    label_mode: attribute
-    attribute: type_code
+    label_mode: icon
 auto_fit: true
 cluster: true
 ```

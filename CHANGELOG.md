@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented here.
 
+## 0.8.5
+
+### Intervention map history
+
+- Keep the full intervention archive permanently in local Home Assistant storage.
+- Show only interventions from the last 7 days as ARTEMIS geolocation map entities.
+- Remove expired map entities without deleting their archived records.
+- Use contextual MDI icons for common intervention types.
+
 ## 0.8.4
 
 ### README / setup guide

@@ -7,6 +7,7 @@ import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from homeassistant.components.geo_location import GeolocationEvent
@@ -23,8 +24,11 @@ from .const import (
     CONF_GEOCODE_ADDRESSES,
     DEFAULT_GEOCODE_ADDRESSES,
     DOMAIN,
+    GEO_LOCATION_HISTORY_WINDOW,
 )
 from .helpers import (
+    intervention_icon,
+    intervention_is_recent,
     merge_intervention_archive,
     navigation_uri,
     normalize_geocoding_query,
@@ -96,6 +100,8 @@ class ArtemisInterventionHistoryManager:
         self._geocode_cache: dict[str, dict[str, Any]] = {}
         self._entities: dict[str, ArtemisInterventionGeoLocation] = {}
         self._lock = asyncio.Lock()
+        self._local_tz = ZoneInfo(hass.config.time_zone)
+        self._initialized = False
 
     async def async_initialize(self) -> None:
         """Load local history, merge the current snapshot and create entities."""
@@ -121,8 +127,11 @@ class ArtemisInterventionHistoryManager:
         await self._async_repair_recent_missing_coordinates()
         await self._async_geocode_missing_coordinates()
 
+        now = datetime.now(UTC)
         entities = []
         for key, record in self._records.items():
+            if not self._record_is_recent(record, now):
+                continue
             entity = ArtemisInterventionGeoLocation(self.hass, key, record)
             self._entities[key] = entity
             entities.append(entity)
@@ -130,11 +139,15 @@ class ArtemisInterventionHistoryManager:
         if entities:
             self._async_add_entities(entities)
 
+        self._initialized = True
         _LOGGER.debug(
             "ARTEMIS intervention archive restored entries=%s active=%s "
-            "storage=local phone_id_logged=false operational_payload_logged=false",
+            "map_feed=%s window_days=%s storage=local phone_id_logged=false "
+            "operational_payload_logged=false",
             len(self._records),
             sum(1 for record in self._records.values() if record.get("active")),
+            len(self._entities),
+            GEO_LOCATION_HISTORY_WINDOW.days,
         )
 
     async def _async_repair_recent_missing_coordinates(self) -> None:
@@ -207,6 +220,20 @@ class ArtemisInterventionHistoryManager:
             }
         )
 
+    def _record_is_recent(
+        self,
+        record: dict[str, Any],
+        now: datetime | None = None,
+    ) -> bool:
+        """Return whether a stored intervention belongs in the map feed."""
+
+        return intervention_is_recent(
+            record,
+            now or datetime.now(UTC),
+            GEO_LOCATION_HISTORY_WINDOW,
+            default_tz=self._local_tz,
+        )
+
     @property
     def _geocoding_enabled(self) -> bool:
         return bool(
@@ -222,9 +249,13 @@ class ArtemisInterventionHistoryManager:
         if not self._geocoding_enabled:
             return
 
-        changed, cache_changed = await self._async_geocode_records(
-            tuple(self._records)
+        now = datetime.now(UTC)
+        recent_keys = tuple(
+            key
+            for key, record in self._records.items()
+            if self._record_is_recent(record, now)
         )
+        changed, cache_changed = await self._async_geocode_records(recent_keys)
         if changed or cache_changed:
             await self._async_save_store()
 
@@ -349,12 +380,49 @@ class ArtemisInterventionHistoryManager:
             "ARTEMIS intervention archive update",
         )
 
+    async def _async_sync_geo_entities(
+        self,
+        changed: set[str],
+        now: datetime,
+    ) -> None:
+        """Keep the temporary Home Assistant geo feed aligned with the 7-day window."""
+
+        expired = [
+            key
+            for key in self._entities
+            if not self._record_is_recent(self._records[key], now)
+        ]
+        for key in expired:
+            entity = self._entities.pop(key)
+            if entity.hass is not None:
+                await entity.async_remove()
+
+        new_entities: list[ArtemisInterventionGeoLocation] = []
+        for key in changed:
+            record = self._records[key]
+            if not self._record_is_recent(record, now):
+                continue
+
+            if entity := self._entities.get(key):
+                entity.update_record(record)
+                if entity.hass is not None:
+                    entity.async_write_ha_state()
+                continue
+
+            entity = ArtemisInterventionGeoLocation(self.hass, key, record)
+            self._entities[key] = entity
+            new_entities.append(entity)
+
+        if new_entities:
+            self._async_add_entities(new_entities)
+
     async def _async_ingest_snapshot(
         self,
         snapshot: OperationsSnapshot | None,
     ) -> None:
         operations = snapshot.operations if snapshot is not None else ()
-        observed_at = datetime.now(UTC).isoformat()
+        now = datetime.now(UTC)
+        observed_at = now.isoformat()
 
         async with self._lock:
             changed, new = merge_intervention_archive(
@@ -364,42 +432,33 @@ class ArtemisInterventionHistoryManager:
             )
             geocoded, cache_changed = await self._async_geocode_records(changed)
             changed.update(geocoded)
+
+            if changed or cache_changed:
+                await self._async_save_store()
+
+            if self._initialized:
+                await self._async_sync_geo_entities(changed, now)
+
             if not changed and not cache_changed:
                 return
 
-            await self._async_save_store()
-
-            new_entities: list[ArtemisInterventionGeoLocation] = []
-            for key in changed:
-                record = self._records[key]
-                if entity := self._entities.get(key):
-                    entity.update_record(record)
-                    if entity.hass is not None:
-                        entity.async_write_ha_state()
-                    continue
-
-                entity = ArtemisInterventionGeoLocation(self.hass, key, record)
-                self._entities[key] = entity
-                new_entities.append(entity)
-
-            if new_entities:
-                self._async_add_entities(new_entities)
-
             _LOGGER.debug(
                 "ARTEMIS intervention archive updated total=%s active=%s changed=%s "
-                "new=%s storage=local operational_payload_logged=false",
+                "new=%s map_feed=%s window_days=%s storage=local "
+                "operational_payload_logged=false",
                 len(self._records),
                 sum(1 for record in self._records.values() if record.get("active")),
                 len(changed),
                 len(new),
+                len(self._entities),
+                GEO_LOCATION_HISTORY_WINDOW.days,
             )
 
 
 class ArtemisInterventionGeoLocation(GeolocationEvent):
-    """One intervention retained as a local Home Assistant map event."""
+    """One recent archived intervention exposed as a Home Assistant map event."""
 
     _attr_source = DOMAIN
-    _attr_icon = "mdi:fire-alert"
     _attr_should_poll = False
     _attr_unit_of_measurement = UnitOfLength.KILOMETERS
 
@@ -422,6 +481,7 @@ class ArtemisInterventionGeoLocation(GeolocationEvent):
         self._record = dict(record)
         number = str(record.get("number") or record.get("id") or "").strip()
         title = str(record.get("title") or "Intervention").strip()
+        self._attr_icon = intervention_icon(title, record.get("type_code"))
         self._attr_name = (
             f"ARTEMIS {number} — {title}" if number else f"ARTEMIS — {title}"
         )

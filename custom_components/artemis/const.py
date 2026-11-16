@@ -26,6 +26,7 @@ DEFAULT_CAS_SERVICE = "https://artemis/artemis-web"
 PLANNING_UPDATE_INTERVAL = timedelta(minutes=5)
 CENTER_COUNTER_UPDATE_INTERVAL = timedelta(seconds=30)
 SMARTEMIS_UPDATE_INTERVAL = timedelta(seconds=30)
+GEO_LOCATION_HISTORY_WINDOW = timedelta(days=7)
 MAX_LOOKAHEAD_WEEKS = 8
 
 # Public WebEvo write cycle. Smartemis writes remain internal until live validation.
