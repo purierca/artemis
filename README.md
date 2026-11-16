@@ -117,13 +117,45 @@ Smartemis maps these fields from the official app protocol, including `grpRadio`
 
 ### Historical map
 
-Version 0.8.0 adds a separate Home Assistant **geolocation source** named `artemis`. This deliberately avoids adding another history sensor.
+ARTEMIS deliberately separates **permanent history storage** from the **Home Assistant map feed**.
 
-Every intervention first observed by Home Assistant is copied into a local archive and retained after it disappears from the live synoptic. The archive stores only normalized intervention data in Home Assistant's local `.storage`; the integration does not upload or synchronize this archive anywhere.
+| Layer | What it contains | Retention |
+| --- | --- | --- |
+| **Local intervention archive** | Every intervention observed by this Home Assistant instance, with the last normalized data and lifecycle timestamps | Permanent while the ARTEMIS config entry exists |
+| **`geo_location.artemis_*` entities** | One temporary Home Assistant geolocation entity per archived intervention inside the configured map-history window | **7 days by default**, configurable |
 
-The archive itself is permanent for the lifetime of the integration entry. The native Home Assistant geolocation feed is deliberately only a **recent view** of that archive: interventions created during the **last 7 days** are exposed as `geo_location.artemis_*`. When an intervention becomes older than 7 days, its geolocation entity disappears from Home Assistant, but its archived record is **not deleted**.
+The permanent archive is **not a Home Assistant sensor/entity**. It is an internal dataset stored in Home Assistant's local `.storage`. Individual `geo_location.artemis_*` entities are only the map-friendly view of the part of that archive currently inside the configured history window.
 
-Each recent geolocation event exposes attributes such as:
+```text
+Permanent local archive (.storage)
+├── intervention A — today
+├── intervention B — 5 days ago
+├── intervention C — 20 days ago
+└── intervention D — 6 months ago
+          │
+          │ Map history = 7 days
+          ▼
+Home Assistant geo_location source
+├── geo_location.artemis_A
+└── geo_location.artemis_B
+```
+
+Interventions C and D are still in the permanent archive; they simply do not exist as current map entities.
+
+#### Change the map-history window
+
+Open:
+
+**Settings -> Devices & services -> ARTEMIS / Smartemis -> Configure -> Map history (days)**
+
+The default is **7 days**. Saving a different value automatically reloads the integration.
+
+- Increasing the value recreates eligible `geo_location` entities from the existing local archive; the interventions do not need to happen again.
+- Decreasing the value removes older `geo_location` entities from Home Assistant.
+- **Neither action deletes archived intervention records.**
+- Removing the ARTEMIS / Smartemis config entry deletes its local archive.
+
+Each recent geolocation entity exposes attributes such as:
 
 - `active`, `first_seen`, `last_seen`, `ended`;
 - `type_code`, `resource_count`, `person_count`;
@@ -131,7 +163,7 @@ Each recent geolocation event exposes attributes such as:
 - `centers`, `vehicles`, `external_services`, `history`;
 - the intervention title/number/address and navigation metadata.
 
-Interventions with coordinates appear directly on a Home Assistant Map card. Interventions without coordinates are still retained locally but cannot be drawn on a map.
+Interventions with coordinates appear directly on a Home Assistant Map card. Interventions without coordinates remain in the permanent archive but cannot be drawn on a map.
 
 Map icons are selected automatically from the intervention title: fire, road accident, fall/person rescue, medical assistance, water rescue, gas, animal rescue, building incident, storm/tree, or a generic alert fallback. Home Assistant's native Map card currently has no `color` option for an entire dynamic geolocation source, so ARTEMIS can supply the contextual icon but cannot force every source marker to red.
 
@@ -147,9 +179,7 @@ auto_fit: true
 cluster: true
 ```
 
-The `artemis` geolocation source can also be used by native geolocation automations. Its attributes make it possible to filter reactions by intervention type, active/ended state, radio group, centre, etc.
-
-The archive starts when this version is installed; it cannot reconstruct interventions that Home Assistant never observed. It survives Home Assistant restarts and is deleted automatically if the ARTEMIS / Smartemis integration entry is removed.
+The archive starts when this feature is installed; it cannot reconstruct interventions that Home Assistant never observed.
 
 ## Polling architecture
 
