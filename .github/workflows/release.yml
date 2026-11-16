@@ -58,11 +58,11 @@ jobs:
               (index for index in range(start, len(lines)) if lines[index].startswith("## ")),
               len(lines),
           )
-          notes = "\\n".join(lines[start:end]).strip()
+          notes = "\n".join(lines[start:end]).strip()
           if not notes:
               raise SystemExit(f"CHANGELOG.md section for {version} is empty")
 
-          output.write_text(notes + "\\n", encoding="utf-8")
+          output.write_text(notes + "\n", encoding="utf-8")
           PY
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
