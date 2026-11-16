@@ -34,6 +34,7 @@ from .coordinator import (
     ArtemisOperationsCoordinator,
     ArtemisPlanningCoordinator,
 )
+from .marker import ArtemisMarkerView
 from .smartemis import SmartemisApi, SmartemisConnectionError, SmartemisServiceError
 from .smartemis_coordinator import (
     SmartemisOperationsCoordinator,
@@ -41,6 +42,7 @@ from .smartemis_coordinator import (
 )
 
 PLATFORMS = [Platform.SENSOR, Platform.BUTTON, Platform.GEO_LOCATION]
+_MARKER_VIEW_REGISTERED = f"{DOMAIN}_marker_view_registered"
 
 
 def _remove_legacy_entities(hass: HomeAssistant, staff_id: str) -> None:
@@ -175,6 +177,10 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the selected ARTEMIS backend."""
+
+    if not hass.data.get(_MARKER_VIEW_REGISTERED):
+        hass.http.register_view(ArtemisMarkerView)
+        hass.data[_MARKER_VIEW_REGISTERED] = True
 
     backend = entry.data.get(CONF_BACKEND, BACKEND_WEBEVO)
     if backend == BACKEND_WEBEVO:
