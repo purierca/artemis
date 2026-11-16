@@ -13,7 +13,14 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .api import ArtemisApi, ArtemisAuthError, ArtemisConnectionError
 from .const import (
@@ -23,6 +30,7 @@ from .const import (
     CONF_CAS_SERVICE,
     CONF_GEOCODE_ADDRESSES,
     CONF_HOST,
+    CONF_MAP_HISTORY_DAYS,
     CONF_PASSWORD,
     CONF_SMARTEMIS_PHONE_ID,
     CONF_SMARTEMIS_SERVER,
@@ -30,7 +38,10 @@ from .const import (
     DEFAULT_CAS_SERVICE,
     DEFAULT_GEOCODE_ADDRESSES,
     DEFAULT_HOST,
+    DEFAULT_MAP_HISTORY_DAYS,
     DOMAIN,
+    MAX_MAP_HISTORY_DAYS,
+    MIN_MAP_HISTORY_DAYS,
 )
 from .smartemis import (
     SmartemisApi,
@@ -476,12 +487,26 @@ class ArtemisOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Required(
+                        CONF_MAP_HISTORY_DAYS,
+                        default=self.config_entry.options.get(
+                            CONF_MAP_HISTORY_DAYS,
+                            DEFAULT_MAP_HISTORY_DAYS,
+                        ),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=MIN_MAP_HISTORY_DAYS,
+                            max=MAX_MAP_HISTORY_DAYS,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Required(
                         CONF_GEOCODE_ADDRESSES,
                         default=self.config_entry.options.get(
                             CONF_GEOCODE_ADDRESSES,
                             DEFAULT_GEOCODE_ADDRESSES,
                         ),
-                    ): bool
+                    ): bool,
                 }
             ),
         )
