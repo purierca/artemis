@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented here.
 
+## 0.8.6
+
+### Configurable map history
+
+- Add **Map history (days)** to the ARTEMIS integration options, defaulting to **7 days**.
+- Changing the value automatically reloads ARTEMIS and rebuilds the `geo_location` map view from the permanent local archive.
+- Changing the map-history window never deletes archived intervention records.
+- Clarify the permanent archive vs temporary `geo_location` entity model in the README.
+
 ## 0.8.5
 
 ### Intervention map history
