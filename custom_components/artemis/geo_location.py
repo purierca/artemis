@@ -22,9 +22,12 @@ from homeassistant.util.location import distance
 from . import ArtemisRuntimeData
 from .const import (
     CONF_GEOCODE_ADDRESSES,
+    CONF_MAP_HISTORY_DAYS,
     DEFAULT_GEOCODE_ADDRESSES,
+    DEFAULT_MAP_HISTORY_DAYS,
     DOMAIN,
-    GEO_LOCATION_HISTORY_WINDOW,
+    MAX_MAP_HISTORY_DAYS,
+    MIN_MAP_HISTORY_DAYS,
 )
 from .helpers import (
     intervention_icon,
@@ -101,6 +104,20 @@ class ArtemisInterventionHistoryManager:
         self._entities: dict[str, ArtemisInterventionGeoLocation] = {}
         self._lock = asyncio.Lock()
         self._local_tz = ZoneInfo(hass.config.time_zone)
+        try:
+            configured_days = int(
+                entry.options.get(
+                    CONF_MAP_HISTORY_DAYS,
+                    DEFAULT_MAP_HISTORY_DAYS,
+                )
+            )
+        except (TypeError, ValueError):
+            configured_days = DEFAULT_MAP_HISTORY_DAYS
+        self._map_history_days = max(
+            MIN_MAP_HISTORY_DAYS,
+            min(MAX_MAP_HISTORY_DAYS, configured_days),
+        )
+        self._map_history_window = timedelta(days=self._map_history_days)
         self._initialized = False
 
     async def async_initialize(self) -> None:
@@ -147,7 +164,7 @@ class ArtemisInterventionHistoryManager:
             len(self._records),
             sum(1 for record in self._records.values() if record.get("active")),
             len(self._entities),
-            GEO_LOCATION_HISTORY_WINDOW.days,
+            self._map_history_days,
         )
 
     async def _async_repair_recent_missing_coordinates(self) -> None:
@@ -230,7 +247,7 @@ class ArtemisInterventionHistoryManager:
         return intervention_is_recent(
             record,
             now or datetime.now(UTC),
-            GEO_LOCATION_HISTORY_WINDOW,
+            self._map_history_window,
             default_tz=self._local_tz,
         )
 
@@ -451,7 +468,7 @@ class ArtemisInterventionHistoryManager:
                 len(changed),
                 len(new),
                 len(self._entities),
-                GEO_LOCATION_HISTORY_WINDOW.days,
+                self._map_history_days,
             )
 
 
