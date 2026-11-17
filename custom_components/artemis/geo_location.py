@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfLength
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.storage import Store
 from homeassistant.util.location import distance
@@ -151,7 +152,12 @@ class ArtemisInterventionHistoryManager:
         for key, record in self._records.items():
             if not self._record_is_recent(record, now):
                 continue
-            entity = ArtemisInterventionGeoLocation(self.hass, key, record)
+            entity = ArtemisInterventionGeoLocation(
+                self.hass,
+                self.entry.entry_id,
+                key,
+                record,
+            )
             self._entities[key] = entity
             entities.append(entity)
 
@@ -404,7 +410,7 @@ class ArtemisInterventionHistoryManager:
         changed: set[str],
         now: datetime,
     ) -> None:
-        """Keep the temporary Home Assistant geo feed aligned with the 7-day window."""
+        """Keep the temporary Home Assistant geo feed aligned with the configured window."""
 
         expired = [
             key
@@ -484,11 +490,20 @@ class ArtemisInterventionGeoLocation(GeolocationEvent):
     def __init__(
         self,
         hass: HomeAssistant,
+        entry_id: str,
         archive_key: str,
         record: dict[str, Any],
     ) -> None:
         digest = hashlib.sha256(archive_key.encode()).hexdigest()[:16]
         self.entity_id = f"geo_location.artemis_{digest}"
+        self._attr_unique_id = f"artemis_intervention_{digest}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry_id}_interventions")},
+            name="ARTEMIS / Smartemis — Interventions",
+            manufacturer="ARTEMIS / Smartemis",
+            model="Intervention map feed",
+            entry_type=DeviceEntryType.SERVICE,
+        )
         self._home_latitude = hass.config.latitude
         self._home_longitude = hass.config.longitude
         self._record: dict[str, Any] = {}
