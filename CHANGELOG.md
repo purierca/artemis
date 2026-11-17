@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented here.
 
+## 0.8.8
+
+### Shared intervention device
+
+- Attach every `geo_location.artemis_*` intervention entity to one Home Assistant device: **ARTEMIS / Smartemis — Interventions**.
+- Give intervention geolocation entities stable `unique_id` values so Home Assistant can register them under that device.
+- This enables one Browser Mod popup-card, targeted at the shared device, to handle every current and future intervention marker.
+- Document the Browser Mod device-target popup pattern in the README.
+
 ## 0.8.7
 
 ### Native coloured map markers
