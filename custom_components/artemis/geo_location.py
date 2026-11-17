@@ -434,7 +434,12 @@ class ArtemisInterventionHistoryManager:
                     entity.async_write_ha_state()
                 continue
 
-            entity = ArtemisInterventionGeoLocation(self.hass, key, record)
+            entity = ArtemisInterventionGeoLocation(
+                self.hass,
+                self.entry.entry_id,
+                key,
+                record,
+            )
             self._entities[key] = entity
             new_entities.append(entity)
 
