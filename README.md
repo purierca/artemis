@@ -199,6 +199,70 @@ cluster: true
 
 If you explicitly prefer the plain Home Assistant MDI marker instead of the coloured ARTEMIS marker, set `label_mode: icon`.
 
+#### Optional: detailed intervention popup with Browser Mod
+
+All recent `geo_location.artemis_*` entities are attached to one Home Assistant device:
+
+**ARTEMIS / Smartemis — Interventions**
+
+This allows Browser Mod to replace the native More Info dialog for every current and future intervention with one static popup-card. The individual intervention entity ID does not need to be known in advance.
+
+In the Browser Mod popup-card editor, select **ARTEMIS / Smartemis — Interventions** as the **Device** target. Browser Mod will then replace `more_info.entityId` with the exact intervention marker that was clicked.
+
+Example popup content:
+
+```yaml
+type: custom:popup-card
+target:
+  device_id: YOUR_ARTEMIS_INTERVENTIONS_DEVICE_ID
+popup_card_all_views: true
+card:
+  type: markdown
+  content: |
+    {% set e = 'more_info.entityId' %}
+    {% set active = state_attr(e, 'active') %}
+    {% set vehicles = state_attr(e, 'vehicles') or [] %}
+    {% set centers = state_attr(e, 'centers') or [] %}
+    {% set services = state_attr(e, 'external_services') or [] %}
+
+    ## {{ state_attr(e, 'number') }} — {{ state_attr(e, 'title') }}
+
+    📍 **{{ state_attr(e, 'address') or 'Address unavailable' }}**
+
+    {% if active is sameas true %}
+    🔴 **Active intervention**
+    {% elif active is sameas false %}
+    ⚫ **Ended intervention**
+    {% endif %}
+
+    🕒 {{ state_attr(e, 'created') or '—' }}
+
+    🚒 **{{ state_attr(e, 'resource_count') or 0 }} vehicle(s)**
+
+    {% if centers %}
+    ### Centres
+    {% for c in centers %}
+    - **{{ c.name }}**{% if c.state_name %} — {{ c.state_name }}{% endif %}
+    {% endfor %}
+    {% endif %}
+
+    {% if vehicles %}
+    ### Vehicles
+    {% for v in vehicles %}
+    - **{{ v.name }}**{% if v.center %} · {{ v.center }}{% endif %}{% if v.state_name %} — {{ v.state_name }}{% endif %}
+    {% endfor %}
+    {% endif %}
+
+    {% if services %}
+    ### External services
+    {% for svc in services %}
+    - **{{ svc.name }}**{% if svc.state_name %} — {{ svc.state_name }}{% endif %}
+    {% endfor %}
+    {% endif %}
+```
+
+The popup remains valid after an intervention ends because the archived `geo_location` entity keeps its final intervention attributes for the configured map-history window.
+
 The archive starts when this feature is installed; it cannot reconstruct interventions that Home Assistant never observed.
 
 ## Polling architecture
